@@ -1,4 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Plus, 
+  Trash2, 
+  Undo2, 
+  Redo2, 
+  Pencil, 
+  Eraser, 
+  Move, 
+  MousePointer2, 
+  Sun, 
+  Moon, 
+  ZoomIn, 
+  ZoomOut, 
+  Maximize, 
+  Lock, 
+  Unlock,
+  Image as ImageIcon,
+  Sparkles,
+  Command,
+  HelpCircle,
+  FileText,
+  ChevronRight,
+  MoreVertical
+} from 'lucide-react';
 import { detectShapeAndStraighten } from './shapeDetection';
 
 export default function App() {
@@ -1134,10 +1159,10 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="logo-wrapper">
-            <i className="fa-solid fa-feather-pointed brand-logo"></i>
+            <Sparkles size={24} color="white" />
           </div>
           <h2>ZenDraw</h2>
-          <span className="badge">OneNote Mode</span>
+          <span className="badge">Pro Edition</span>
         </div>
 
         {/* 1. Notebooks Manager */}
@@ -1145,27 +1170,33 @@ export default function App() {
           <div className="section-header">
             <h3>Notebooks</h3>
             <button className="icon-btn tooltip" onClick={() => createNewNotebook('New Notebook')} data-tooltip="Create Notebook">
-              <i className="fa-solid fa-folder-plus"></i>
+              <Plus size={18} />
             </button>
           </div>
           <div className="notes-list">
-            {notebooks.map((nb) => (
-              <div
-                key={nb.id}
-                className={`note-item ${nb.id === activeNotebookId ? 'active' : ''}`}
-                onClick={() => selectNotebook(nb.id)}
-              >
-                <div className="note-info">
-                  <span className="note-name"><i className="fa-solid fa-book-open"></i> {nb.title}</span>
-                  <span className="note-date">{nb.pages ? nb.pages.length : 0} pages</span>
-                </div>
-                <div className="note-actions">
-                  <button className="delete-note-btn tooltip" onClick={(e) => deleteNotebook(nb.id, e)} data-tooltip="Delete notebook">
-                    <i className="fa-solid fa-circle-xmark"></i>
-                  </button>
-                </div>
-              </div>
-            ))}
+            <AnimatePresence mode="popLayout">
+              {notebooks.map((nb) => (
+                <motion.div
+                  layout
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  key={nb.id}
+                  className={`note-item ${nb.id === activeNotebookId ? 'active' : ''}`}
+                  onClick={() => selectNotebook(nb.id)}
+                >
+                  <div className="note-info">
+                    <span className="note-name"><FileText size={14} style={{ marginRight: '8px' }} /> {nb.title}</span>
+                    <span className="note-date">{nb.pages ? nb.pages.length : 0} pages</span>
+                  </div>
+                  <div className="note-actions">
+                    <button className="delete-note-btn tooltip" onClick={(e) => deleteNotebook(nb.id, e)} data-tooltip="Delete notebook">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </div>
 
@@ -1175,27 +1206,33 @@ export default function App() {
             <div className="section-header">
               <h3>Pages</h3>
               <button className="icon-btn tooltip" onClick={() => createNewPage(activeNotebookId)} data-tooltip="New page in this notebook">
-                <i className="fa-solid fa-plus"></i>
+                <Plus size={18} />
               </button>
             </div>
             <div className="notes-list">
+            <AnimatePresence mode="popLayout">
               {activeNotebook.pages && activeNotebook.pages.map((page) => (
-                <div
+                <motion.div
+                  layout
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
                   key={page.id}
                   className={`note-item ${page.id === activePageId ? 'active' : ''}`}
                   onClick={() => selectPage(page.id)}
                 >
                   <div className="note-info">
-                    <span className="note-name"><i className="fa-solid fa-file-signature"></i> {page.title}</span>
-                    <span className="note-date"><i className="fa-solid fa-clock"></i> {page.date}</span>
+                    <span className="note-name"><FileText size={14} style={{ marginRight: '8px' }} /> {page.title}</span>
+                    <span className="note-date">{page.date}</span>
                   </div>
                   <div className="note-actions">
                     <button className="delete-note-btn tooltip" onClick={(e) => deletePage(page.id, e)} data-tooltip="Delete page">
-                      <i className="fa-solid fa-circle-xmark"></i>
+                      <Trash2 size={14} />
                     </button>
                   </div>
-                </div>
+                </motion.div>
               ))}
+            </AnimatePresence>
             </div>
           </div>
         )}
@@ -1232,20 +1269,20 @@ export default function App() {
 
         <div className="sidebar-footer">
           <div className="shortcuts-guide">
-            <h4><i className="fa-solid fa-shapes"></i> Shape AutoDetect</h4>
+            <h4><Sparkles size={14} /> Shape AutoDetect</h4>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
               Draw rough lines, circles, or rectangles. End the stroke and it automatically snaps into a perfectly clean shape.
             </p>
           </div>
           <button className="action-btn download-btn" onClick={() => alert('Fully saved to OneNote-style notebooks!')}>
-            <i className="fa-solid fa-cloud-arrow-up"></i> Save notebook
+            <Lock size={16} /> Save notebook
           </button>
           <div className="backup-buttons" style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
             <button className="action-btn download-btn tooltip" onClick={exportNotebookData} data-tooltip="Backup & Export notebooks to a JSON file" style={{ flex: 1, padding: '8px 10px', fontSize: '12px' }}>
-              <i className="fa-solid fa-file-export"></i> Export JSON
+              <Undo2 size={14} /> Export JSON
             </button>
             <label className="action-btn download-btn tooltip" data-tooltip="Import notebooks from a JSON file" style={{ flex: 1, padding: '8px 10px', fontSize: '12px', textAlign: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-              <i className="fa-solid fa-file-import"></i> Import JSON
+              <Redo2 size={14} /> Import JSON
               <input type="file" accept=".json" onChange={importNotebookData} style={{ display: 'none' }} />
             </label>
           </div>
@@ -1265,7 +1302,7 @@ export default function App() {
               }}
               data-tooltip="Brush / Marker"
             >
-              <i className="fa-solid fa-pen-nib"></i>
+              <Pencil size={20} />
             </button>
             <button
               className={`tool-btn tooltip ${currentMode === 'eraser' ? 'active' : ''}`}
@@ -1275,17 +1312,17 @@ export default function App() {
               }}
               data-tooltip="Eraser"
             >
-              <i className="fa-solid fa-eraser"></i>
+              <Eraser size={20} />
             </button>
             <button
               className={`tool-btn tooltip ${currentMode === 'select' ? 'active' : ''}`}
               onClick={() => setCurrentMode('select')}
               data-tooltip="Select & Resize Images"
             >
-              <i className="fa-solid fa-arrow-pointer"></i>
+              <MousePointer2 size={20} />
             </button>
             <label className="tool-btn tooltip" data-tooltip="Add Image">
-              <i className="fa-solid fa-image"></i>
+              <ImageIcon size={20} />
               <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
             </label>
             <button
@@ -1296,7 +1333,7 @@ export default function App() {
               }}
               data-tooltip="Translate pan View"
             >
-              <i className="fa-solid fa-hand"></i>
+              <Move size={20} />
             </button>
             {/* Lock / Unlock button — only visible when an image is selected in select mode */}
             {currentMode === 'select' && selectedElementId && (() => {
@@ -1310,12 +1347,12 @@ export default function App() {
                   data-tooltip={selectedImg.locked ? 'Unlock Image' : 'Lock Image Position & Size'}
                   style={selectedImg.locked ? { color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)' } : {}}
                 >
-                  <i className={`fa-solid ${selectedImg.locked ? 'fa-lock' : 'fa-lock-open'}`}></i>
+                  {selectedImg.locked ? <Lock size={20} /> : <Unlock size={20} />}
                 </button>
               );
             })()}
             <button className="tool-btn tooltip" onClick={clearCanvas} data-tooltip="Clear Drawings">
-              <i className="fa-solid fa-trash-can"></i>
+              <Trash2 size={20} />
             </button>
           </div>
 
@@ -1333,7 +1370,7 @@ export default function App() {
               }}
               data-tooltip="Thin Precision Pencil (1.5px)"
             >
-              <i className="fa-solid fa-pencil"></i> Thin
+              <Pencil size={14} /> Thin
             </button>
             <button
               className={`style-preset-btn tooltip ${currentBrushSize === 4 && !currentGlow ? 'active' : ''}`}
@@ -1344,7 +1381,7 @@ export default function App() {
               }}
               data-tooltip="Ink pen line (4px)"
             >
-              <i className="fa-solid fa-pen"></i> Ink
+              <Pencil size={14} /> Ink
             </button>
             <button
               className={`style-preset-btn tooltip ${currentBrushSize === 9 && !currentGlow ? 'active' : ''}`}
@@ -1355,7 +1392,7 @@ export default function App() {
               }}
               data-tooltip="Highlighter (9px)"
             >
-              <i className="fa-solid fa-marker"></i> Marker
+              <Pencil size={14} /> Marker
             </button>
             <button
               className={`style-preset-btn tooltip ${currentBrushSize === 18 && !currentGlow ? 'active' : ''}`}
@@ -1366,7 +1403,7 @@ export default function App() {
               }}
               data-tooltip="Artistic Heavy Brush (18px)"
             >
-              <i className="fa-solid fa-paint-brush"></i> Brush
+              <Pencil size={14} /> Brush
             </button>
             <button
               className={`style-preset-btn tooltip glow-style ${currentGlow ? 'active' : ''}`}
@@ -1377,7 +1414,7 @@ export default function App() {
               }}
               data-tooltip="Glow magical stroke"
             >
-              <i className="fa-solid fa-wand-magic-sparkles"></i> Magic
+              <Sparkles size={14} /> Magic
             </button>
           </div>
 
@@ -1386,7 +1423,7 @@ export default function App() {
           {/* Preset aesthetics colors */}
           <div className="tool-group color-tools">
             <div className="preset-colors">
-              {['#ffffff', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#a855f7', '#ef4444'].map((col) => (
+              {['#ffffff', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#a855f7', '#ef4444'].map((col) => (
                 <button
                   key={col}
                   className={`color-swatch tooltip ${currentColor === col ? 'active' : ''}`}
@@ -1408,7 +1445,7 @@ export default function App() {
                   setCurrentMode('brush');
                 }}
               />
-              <i className="fa-solid fa-eye-dropper"></i>
+              <MousePointer2 size={16} />
             </div>
           </div>
 
@@ -1425,7 +1462,7 @@ export default function App() {
                 />
                 <span className="slider round"></span>
               </label>
-              <span className="toggle-label"><i className="fa-solid fa-arrow-up-right-dots"></i> Pressure</span>
+              <span className="toggle-label"><Maximize size={14} /> Pressure</span>
             </div>
 
             <div className="toggle-wrapper tooltip" data-tooltip="Enable auto shape & straight line detection">
@@ -1437,16 +1474,16 @@ export default function App() {
                 />
                 <span className="slider round"></span>
               </label>
-              <span className="toggle-label"><i className="fa-solid fa-shapes"></i> Shapes</span>
+              <span className="toggle-label"><Sparkles size={14} /> Shapes</span>
             </div>
 
             <div className="zoom-controls">
               <button className="zoom-btn tooltip" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))} data-tooltip="Zoom Out">
-                <i className="fa-solid fa-magnifying-glass-minus"></i>
+                <ZoomOut size={16} />
               </button>
               <span className="zoom-val">{Math.round(zoom * 100)}%</span>
               <button className="zoom-btn tooltip" onClick={() => setZoom(Math.min(5.0, zoom + 0.1))} data-tooltip="Zoom In">
-                <i className="fa-solid fa-magnifying-glass-plus"></i>
+                <ZoomIn size={16} />
               </button>
               <button
                 className="zoom-btn tooltip"
@@ -1457,7 +1494,7 @@ export default function App() {
                 }}
                 data-tooltip="Reset View"
               >
-                <i className="fa-solid fa-arrows-to-circle"></i>
+                <Maximize size={16} />
               </button>
             </div>
           </div>
@@ -1467,16 +1504,16 @@ export default function App() {
           {/* Undoing/Redoing */}
           <div className="tool-group actions-tools">
             <button className="tool-btn tooltip" onClick={undo} data-tooltip="Undo (Cmd/Ctrl + Z)">
-              <i className="fa-solid fa-arrow-rotate-left"></i>
+              <Undo2 size={20} />
             </button>
             <button className="tool-btn tooltip" onClick={redo} data-tooltip="Redo (Cmd/Ctrl + Y)">
-              <i className="fa-solid fa-arrow-rotate-right"></i>
+              <Redo2 size={20} />
             </button>
             <button className="tool-btn tooltip highlight" onClick={exportNote} data-tooltip="Export current page as PNG">
-              <i className="fa-solid fa-download"></i> PNG
+              <Plus size={16} /> PNG
             </button>
             <button className="tool-btn tooltip highlight" onClick={exportNotebookToPdf} data-tooltip="Export whole notebook to PDF">
-              <i className="fa-solid fa-file-pdf"></i> PDF
+              <Plus size={16} /> PDF
             </button>
           </div>
 
@@ -1485,7 +1522,7 @@ export default function App() {
           {/* Theme modes */}
           <div className="tool-group theme-tools">
             <button className="tool-btn tooltip" onClick={() => setDarkMode(!darkMode)} data-tooltip="Theme Background Mode">
-              <i className={`fa-solid ${darkMode ? 'fa-moon' : 'fa-sun'}`}></i>
+              {darkMode ? <Moon size={20} /> : <Sun size={20} />}
             </button>
           </div>
         </header>
@@ -1515,7 +1552,7 @@ export default function App() {
               textAlign: 'center',
               padding: '24px'
             }}>
-              <i className="fa-solid fa-book-open" style={{ fontSize: '48px', color: 'var(--primary)', marginBottom: '16px' }}></i>
+              <FileText size={48} color={darkMode ? '#3b82f6' : '#2563eb'} style={{ marginBottom: '16px' }} />
               <h3 style={{ margin: '0 0 8px 0' }}>No Notebook Active</h3>
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)' }}>
                 Create a notebook or import your data from the sidebar to start drawing.
@@ -1523,7 +1560,7 @@ export default function App() {
             </div>
           )}
           <div className="canvas-overlay">
-            <p className="canvas-hint"><i className="fa-solid fa-hand-pointer"></i> Infinite whiteboard with OneNote-style notebooks active...</p>
+            <p className="canvas-hint"><MousePointer2 size={14} /> Infinite whiteboard with OneNote-style notebooks active...</p>
           </div>
         </div>
       </main>
