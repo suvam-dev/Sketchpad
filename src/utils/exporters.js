@@ -1,7 +1,7 @@
 /**
  * Offline Export & Import utilities: PNG, Vector SVG, Multi-page PDF, and JSON Backup.
  */
-import { renderPageToContext, PAPER_COLORS } from './drawingEngine';
+import { renderPageToContext, PAPER_COLORS, resolveStrokeColor } from './drawingEngine';
 
 function sanitizeFilename(name, fallback = 'scratchpad-note') {
   const clean = (name || fallback)
@@ -94,17 +94,18 @@ export function exportPageToSvg({
     if (stroke.tool === 'eraser') return; // SVG export omits destination-out strokes cleanly
 
     const pts = stroke.points;
+    const color = resolveStrokeColor(stroke.color, darkMode, stroke.tool);
     const opacity =
       stroke.tool === 'highlighter'
-        ? stroke.opacity ?? 0.32
+        ? stroke.opacity ?? 0.36
         : stroke.tool === 'pencil'
-        ? stroke.opacity ?? 0.72
+        ? stroke.opacity ?? 0.78
         : stroke.opacity ?? 1;
 
     if (pts.length === 1) {
       const r = (stroke.width || 2) / 2;
       svgParts.push(
-        `<circle cx="${pts[0].x.toFixed(2)}" cy="${pts[0].y.toFixed(2)}" r="${r.toFixed(2)}" fill="${stroke.color}" fill-opacity="${opacity}" />`
+        `<circle cx="${pts[0].x.toFixed(2)}" cy="${pts[0].y.toFixed(2)}" r="${r.toFixed(2)}" fill="${color}" fill-opacity="${opacity}" />`
       );
       return;
     }
@@ -128,11 +129,11 @@ export function exportPageToSvg({
         : '';
     const fillAttr =
       stroke.fill && stroke.isShape
-        ? ` fill="${stroke.color}" fill-opacity="0.14"`
+        ? ` fill="${color}" fill-opacity="0.14"`
         : ' fill="none"';
 
     svgParts.push(
-      `<path d="${d}"${fillAttr} stroke="${stroke.color}" stroke-width="${w.toFixed(2)}" stroke-linecap="${cap}" stroke-linejoin="round" stroke-opacity="${opacity}"${dashAttr} />`
+      `<path d="${d}"${fillAttr} stroke="${color}" stroke-width="${w.toFixed(2)}" stroke-linecap="${cap}" stroke-linejoin="round" stroke-opacity="${opacity}"${dashAttr} />`
     );
   });
 

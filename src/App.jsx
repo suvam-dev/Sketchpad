@@ -25,6 +25,7 @@ import {
   exportNotebookToPdf,
   exportNotebooksToJson,
 } from './utils/exporters';
+import { resolveStrokeColor } from './utils/drawingEngine';
 
 const MAX_HISTORY = 50;
 
@@ -149,19 +150,10 @@ export default function App() {
   const handleToggleTheme = useCallback(() => {
     setDarkMode((prev) => {
       const next = !prev;
-      setCurrentColor((col) => {
-        const lower = col.toLowerCase();
-        if (next && (lower === '#0f172a' || lower === '#18181b' || lower === '#000000' || lower === '#111111')) {
-          return '#f8fafc';
-        }
-        if (!next && (lower === '#f8fafc' || lower === '#f4f4f6' || lower === '#ffffff' || lower === '#fafafa')) {
-          return '#0f172a';
-        }
-        return col;
-      });
+      setCurrentColor((col) => resolveStrokeColor(col, next, currentTool));
       return next;
     });
-  }, []);
+  }, [currentTool]);
 
   // Persist session preferences
   useEffect(() => {

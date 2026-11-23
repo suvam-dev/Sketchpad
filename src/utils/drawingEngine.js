@@ -1,7 +1,7 @@
 /**
  * High-performance HTML5 Canvas Drawing Engine for Scratchpad.
- * Uses tiled CanvasPattern for O(1) paper rendering and reusable offscreen compositing
- * for smooth 60–120fps stylus, trackpad, and mouse drawing.
+ * Uses tiled CanvasPattern for O(1) paper rendering, theme-adaptive ink color mapping,
+ * and reusable offscreen compositing for smooth 60–120fps drawing.
  */
 
 export const PAPER_COLORS = {
@@ -16,6 +16,81 @@ export const PAPER_COLORS = {
     line: 'rgba(15, 23, 42, 0.08)',
   },
 };
+
+// Paired dark <-> light ink palette (Excalidraw / tldraw style)
+const DARK_TO_LIGHT_MAP = {
+  '#f8fafc': '#1e1e1e',
+  '#f4f4f6': '#1e1e1e',
+  '#ffffff': '#1e1e1e',
+  '#fafafa': '#1e1e1e',
+  '#94a3b8': '#868e96',
+  '#ff6b6b': '#e03131',
+  '#ffa94d': '#f08c00',
+  '#ffd43b': '#eab308',
+  '#51cf66': '#2f9e44',
+  '#20c997': '#099268',
+  '#4dabf7': '#1971c2',
+  '#38bdf8': '#0ea5e9',
+  '#f06595': '#e64980',
+};
+
+const LIGHT_TO_DARK_MAP = {
+  '#1e1e1e': '#f8fafc',
+  '#111827': '#f8fafc',
+  '#0f172a': '#f8fafc',
+  '#18181b': '#f8fafc',
+  '#000000': '#f8fafc',
+  '#111111': '#f8fafc',
+  '#868e96': '#94a3b8',
+  '#e03131': '#ff6b6b',
+  '#f08c00': '#ffa94d',
+  '#eab308': '#ffd43b',
+  '#2f9e44': '#51cf66',
+  '#099268': '#20c997',
+  '#1971c2': '#4dabf7',
+  '#0ea5e9': '#38bdf8',
+  '#e64980': '#f06595',
+};
+
+function parseHexRgb(hex) {
+  if (typeof hex !== 'string' || !hex.startsWith('#')) return null;
+  let clean = hex.slice(1).trim();
+  if (clean.length === 3) {
+    clean = clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2];
+  }
+  if (clean.length !== 6) return null;
+  const num = parseInt(clean, 16);
+  if (Number.isNaN(num)) return null;
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+/**
+ * Dynamically adapts stroke ink colors so notes written in Dark Mode remain
+ * crisp and legible in Light Mode (and vice versa), without mutating saved data.
+ */
+export function resolveStrokeColor(color, darkMode, tool = 'pen') {
+  if (!color || tool === 'eraser' || tool === 'highlighter') return color;
+  const lower = color.toLowerCase();
+
+  if (darkMode && LIGHT_TO_DARK_MAP[lower]) {
+    return LIGHT_TO_DARK_MAP[lower];
+  }
+  if (!darkMode && DARK_TO_LIGHT_MAP[lower]) {
+    return DARK_TO_LIGHT_MAP[lower];
+  }
+
+  const rgb = parseHexRgb(lower);
+  if (!rgb) return color;
+  const luminance = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+
+  if (!darkMode && luminance > 228) {
+    return '#1e1e1e';
+  }
+  if (darkMode && luminance < 40) {
+    return '#f8fafc';
+  }
+  return color;
+}
 
 // Reusable offscreen stroke buffer to avoid per-frame GPU texture allocations
 let sharedStrokeCanvas = null;
@@ -96,28 +171,29 @@ export function drawPaperBackground(ctx, width, height, panX, panY, zoom, paperS
 /**
  * Draws a single incremental quadratic segment for ultra-low-latency live ink rendering.
  */
-export function renderLiveSegment(ctx, pts, stroke) {
+export function renderLiveSegment(ctx, pts, stroke, darkMode = true) {
   if (!pts || pts.length === 0) return;
 
   const tool = stroke.tool || 'pen';
   const baseWidth = stroke.width || 2.5;
+  const resolvedColor = resolveStrokeColor(stroke.color, darkMode, tool);
 
   ctx.save();
   ctx.lineCap = tool === 'highlighter' ? 'butt' : 'round';
   ctx.lineJoin = 'round';
   ctx.globalCompositeOperation = 'source-over';
-  ctx.strokeStyle = stroke.color;
-  ctx.fillStyle = stroke.color;
+  ctx.strokeStyle = resolvedColor;
+  ctx.fillStyle = resolvedColor;
   ctx.globalAlpha =
     tool === 'highlighter'
-      ? stroke.opacity ?? 0.32
+      ? stroke.opacity ?? 0.36
       : tool === 'pencil'
-      ? stroke.opacity ?? 0.72
+      ? stroke.opacity ?? 0.78
       : stroke.opacity ?? 1;
 
   if (stroke.isGlow) {
     ctx.shadowBlur = baseWidth * 1.6;
-    ctx.shadowColor = stroke.color;
+    ctx.shadowColor = resolvedColor;
   }
 
   const len = pts.length;
@@ -168,12 +244,13 @@ export function renderLiveSegment(ctx, pts, stroke) {
  * Uses a single continuous path whenever pressure is uniform or opacity < 1 (Pencil/Highlighter)
  * so round line caps never overlap and create dot artifacts even at 500% zoom.
  */
-export function renderStroke(ctx, stroke) {
+export function renderStroke(ctx, stroke, darkMode = true) {
   if (!stroke || !stroke.points || stroke.points.length === 0) return;
 
   const pts = stroke.points;
   const tool = stroke.tool || 'pen';
   const baseWidth = stroke.width || 2.5;
+  const resolvedColor = resolveStrokeColor(stroke.color, darkMode, tool);
 
   ctx.save();
   ctx.lineCap = 'round';
@@ -186,25 +263,25 @@ export function renderStroke(ctx, stroke) {
     ctx.globalAlpha = 1;
   } else if (tool === 'highlighter') {
     ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = stroke.color;
-    ctx.fillStyle = stroke.color;
+    ctx.strokeStyle = resolvedColor;
+    ctx.fillStyle = resolvedColor;
     ctx.globalAlpha = stroke.opacity ?? 0.36;
     ctx.lineCap = 'butt';
   } else if (tool === 'pencil') {
     ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = stroke.color;
-    ctx.fillStyle = stroke.color;
+    ctx.strokeStyle = resolvedColor;
+    ctx.fillStyle = resolvedColor;
     ctx.globalAlpha = stroke.opacity ?? 0.78;
   } else {
     ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = stroke.color;
-    ctx.fillStyle = stroke.color;
+    ctx.strokeStyle = resolvedColor;
+    ctx.fillStyle = resolvedColor;
     ctx.globalAlpha = stroke.opacity ?? 1;
   }
 
   if (stroke.isGlow && tool !== 'eraser') {
     ctx.shadowBlur = baseWidth * 1.6;
-    ctx.shadowColor = stroke.color;
+    ctx.shadowColor = resolvedColor;
   } else {
     ctx.shadowBlur = 0;
   }
@@ -472,11 +549,11 @@ export function renderPageToContext(
 
   if (Array.isArray(page.strokes)) {
     for (let i = 0; i < page.strokes.length; i++) {
-      renderStroke(sCtx, page.strokes[i]);
+      renderStroke(sCtx, page.strokes[i], darkMode);
     }
   }
   if (activeStroke) {
-    renderStroke(sCtx, activeStroke);
+    renderStroke(sCtx, activeStroke, darkMode);
   }
   sCtx.restore();
 

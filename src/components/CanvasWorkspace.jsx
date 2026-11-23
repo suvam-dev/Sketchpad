@@ -225,7 +225,7 @@ export default function CanvasWorkspace({
     lCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     lCtx.scale(s.zoom, s.zoom);
     lCtx.translate(s.panX, s.panY);
-    renderLiveSegment(lCtx, stroke.points, stroke);
+    renderLiveSegment(lCtx, stroke.points, stroke, s.darkMode);
     lCtx.restore();
   }, []);
 
@@ -244,7 +244,7 @@ export default function CanvasWorkspace({
     lCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     lCtx.scale(s.zoom, s.zoom);
     lCtx.translate(s.panX, s.panY);
-    renderStroke(lCtx, stroke);
+    renderStroke(lCtx, stroke, s.darkMode);
     lCtx.restore();
   }, []);
 
