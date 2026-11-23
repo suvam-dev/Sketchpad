@@ -1,0 +1,20 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#0F1115"/>
+  <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+    <circle cx="16" cy="16" r="1.4" fill="rgba(255,255,255,0.12)"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#dots)"/>
+  <rect x="88" y="88" width="1024" height="454" rx="24" fill="#15181E" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
+  <rect x="148" y="156" width="68" height="68" rx="16" fill="#2563EB"/>
+  <path d="M167 205L171 192L192 171C194 169 197 169 199 171L201.5 173.5C203.5 175.5 203.5 178.5 201.5 180.5L180.5 201.5L167 205Z" stroke="#FFFFFF" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M187 176L196 185" stroke="#FFFFFF" stroke-width="3.6" stroke-linecap="round"/>
+  <path d="M167 211H198" stroke="#93C5FD" stroke-width="3.6" stroke-linecap="round"/>
+  <text x="148" y="294" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, Inter, Segoe UI, sans-serif" font-size="60" font-weight="700" letter-spacing="-1.5">Scratchpad</text>
+  <text x="148" y="352" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, Inter, Segoe UI, sans-serif" font-size="28" font-weight="400">Offline-First Infinite Digital Notebook &amp; Stylus Canvas</text>
+  <rect x="148" y="402" width="168" height="42" rx="21" fill="rgba(59,130,246,0.16)" stroke="rgba(59,130,246,0.4)"/>
+  <text x="174" y="429" fill="#93C5FD" font-family="-apple-system, BlinkMacSystemFont, Inter, sans-serif" font-size="18" font-weight="600">100% Offline</text>
+  <rect x="332" y="402" width="204" height="42" rx="21" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)"/>
+  <text x="358" y="429" fill="#E2E8F0" font-family="-apple-system, BlinkMacSystemFont, Inter, sans-serif" font-size="18" font-weight="500">Pressure &amp; Shapes</text>
+  <rect x="552" y="402" width="210" height="42" rx="21" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.12)"/>
+  <text x="578" y="429" fill="#E2E8F0" font-family="-apple-system, BlinkMacSystemFont, Inter, sans-serif" font-size="18" font-weight="500">PNG · SVG · PDF</text>
+</svg>
