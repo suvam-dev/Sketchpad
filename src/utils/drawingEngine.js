@@ -3,6 +3,12 @@
  * Uses tiled CanvasPattern for O(1) paper rendering, theme-adaptive ink color mapping,
  * and reusable offscreen compositing for smooth 60–120fps drawing.
  */
+import {
+  renderTextElement,
+  renderTableElement,
+  renderSchemaElement,
+  renderRelationElement,
+} from './structuredElements';
 
 export const PAPER_COLORS = {
   dark: {
@@ -494,6 +500,10 @@ export function renderPageToContext(
     includePaper = true,
     imageCache = {},
     selectedElementId = null,
+    selectedElementType = null,
+    editingTextId = null,
+    editingCell = null,
+    showSchemaAnchors = false,
     activeStroke = null,
     onImageLoad = null,
   }
@@ -511,7 +521,7 @@ export function renderPageToContext(
     return;
   }
 
-  // Draw images directly onto main canvas
+  // Draw images & structured elements directly onto main canvas in world coordinates
   ctx.save();
   ctx.scale(zoom, zoom);
   ctx.translate(panX, panY);
@@ -527,10 +537,67 @@ export function renderPageToContext(
       }
       if (imgObj.complete && imgObj.naturalWidth > 0) {
         ctx.drawImage(imgObj, img.x, img.y, img.width, img.height);
-        renderImageOverlay(ctx, img, selectedElementId === img.id, zoom);
+        renderImageOverlay(
+          ctx,
+          img,
+          selectedElementId === img.id && (!selectedElementType || selectedElementType === 'image'),
+          zoom
+        );
       }
     });
   }
+
+  // Schema relationships (drawn beneath schema cards)
+  if (Array.isArray(page.relations) && Array.isArray(page.schemas)) {
+    page.relations.forEach((rel) => {
+      renderRelationElement(ctx, rel, page.schemas, {
+        darkMode,
+        isSelected: selectedElementType === 'relation' && selectedElementId === rel.id,
+        zoom,
+        resolveColor: resolveStrokeColor,
+      });
+    });
+  }
+
+  // Tables
+  if (Array.isArray(page.tables)) {
+    page.tables.forEach((table) => {
+      renderTableElement(ctx, table, {
+        darkMode,
+        isSelected: selectedElementType === 'table' && selectedElementId === table.id,
+        zoom,
+        editingCell,
+        resolveColor: resolveStrokeColor,
+      });
+    });
+  }
+
+  // Schema / ER entity nodes
+  if (Array.isArray(page.schemas)) {
+    page.schemas.forEach((schema) => {
+      renderSchemaElement(ctx, schema, {
+        darkMode,
+        isSelected: selectedElementType === 'schema' && selectedElementId === schema.id,
+        zoom,
+        showAnchors: showSchemaAnchors,
+        resolveColor: resolveStrokeColor,
+      });
+    });
+  }
+
+  // Text boxes
+  if (Array.isArray(page.texts)) {
+    page.texts.forEach((txt) => {
+      renderTextElement(ctx, txt, {
+        darkMode,
+        isSelected: selectedElementType === 'text' && selectedElementId === txt.id,
+        zoom,
+        isEditing: editingTextId === txt.id,
+        resolveColor: resolveStrokeColor,
+      });
+    });
+  }
+
   ctx.restore();
 
   const hasStrokes = (Array.isArray(page.strokes) && page.strokes.length > 0) || Boolean(activeStroke);

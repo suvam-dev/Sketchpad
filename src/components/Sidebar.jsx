@@ -50,6 +50,31 @@ function PageThumbnail({ page, darkMode, imageCache }) {
       if (img.y + img.height > maxY) maxY = img.y + img.height;
     });
 
+    (page.texts || []).forEach((txt) => {
+      if (txt.x < minX) minX = txt.x;
+      if (txt.y < minY) minY = txt.y;
+      if (txt.x + (txt.width || 220) > maxX) maxX = txt.x + (txt.width || 220);
+      if (txt.y + 60 > maxY) maxY = txt.y + 60;
+    });
+
+    (page.tables || []).forEach((tbl) => {
+      const tw = (tbl.colWidths || [130, 130]).reduce((a, b) => a + b, 0);
+      const th = (tbl.rows || []).length * (tbl.rowHeight || 34);
+      if (tbl.x < minX) minX = tbl.x;
+      if (tbl.y < minY) minY = tbl.y;
+      if (tbl.x + tw > maxX) maxX = tbl.x + tw;
+      if (tbl.y + th > maxY) maxY = tbl.y + th;
+    });
+
+    (page.schemas || []).forEach((sch) => {
+      const sw = sch.width || 256;
+      const sh = 36 + Math.max(1, (sch.fields || []).length) * 28 + 6;
+      if (sch.x < minX) minX = sch.x;
+      if (sch.y < minY) minY = sch.y;
+      if (sch.x + sw > maxX) maxX = sch.x + sw;
+      if (sch.y + sh > maxY) maxY = sch.y + sh;
+    });
+
     let zoom = 0.22;
     let panX = 0;
     let panY = 0;
@@ -73,7 +98,7 @@ function PageThumbnail({ page, darkMode, imageCache }) {
       includePaper: true,
       imageCache,
     });
-  }, [page, page.strokes, page.images, page.paperStyle, darkMode, imageCache]);
+  }, [page, page.strokes, page.images, page.texts, page.tables, page.schemas, page.relations, page.paperStyle, darkMode, imageCache]);
 
   return <canvas ref={thumbRef} className="sp-thumb-canvas" aria-hidden="true" />;
 }

@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import FloatingToolbar from './components/FloatingToolbar';
 import BottomBar from './components/BottomBar';
 import CanvasWorkspace from './components/CanvasWorkspace';
+import SchemaEditorPanel from './components/SchemaEditorPanel';
 import ExportModal from './components/ExportModal';
 import SettingsModal from './components/SettingsModal';
 import Toast from './components/Toast';
@@ -26,6 +27,7 @@ import {
   exportNotebooksToJson,
 } from './utils/exporters';
 import { resolveStrokeColor } from './utils/drawingEngine';
+import { generateAllSchemasSql } from './utils/structuredElements';
 
 const MAX_HISTORY = 50;
 
@@ -36,6 +38,17 @@ const DEFAULT_TOOL_WIDTHS = {
   eraser: 24,
   shape: 2.5,
 };
+
+function makeSnapshot(page) {
+  return {
+    strokes: page?.strokes || [],
+    images: page?.images || [],
+    texts: page?.texts || [],
+    tables: page?.tables || [],
+    schemas: page?.schemas || [],
+    relations: page?.relations || [],
+  };
+}
 
 export default function App() {
   // Loading & persistence state
@@ -58,11 +71,25 @@ export default function App() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Drawing tool state
-  const [currentTool, setCurrentTool] = useState('pen'); // pen, pencil, highlighter, shape, eraser, select, pan
-  const [shapeType, setShapeType] = useState('arrow'); // line, arrow, curvedArrow, elbowArrow, rectangle, circle, etc.
-  const [strokeStyle, setStrokeStyle] = useState('solid'); // solid, dashed, dotted
+  // Drawing & structured tool state
+  const [currentTool, setCurrentTool] = useState('pen'); // pen, pencil, highlighter, shape, text, table, schema, eraser, select, pan
+  const [shapeType, setShapeType] = useState('arrow');
+  const [strokeStyle, setStrokeStyle] = useState('solid');
   const [shapeFill, setShapeFill] = useState(false);
+  const [textStyle, setTextStyle] = useState({
+    fontFamily: 'sans',
+    fontSize: 18,
+    fontWeight: 'normal',
+    fontStyle: 'normal',
+    textAlign: 'left',
+  });
+  const [tablePreset, setTablePreset] = useState({
+    rows: 3,
+    cols: 3,
+    headerRow: true,
+  });
+  const [schemaTemplate, setSchemaTemplate] = useState('users');
+
   const [currentColor, setCurrentColor] = useState('#f8fafc');
   const [toolWidths, setToolWidths] = useState(DEFAULT_TOOL_WIDTHS);
   const [currentGlow, setCurrentGlow] = useState(false);
@@ -77,9 +104,16 @@ export default function App() {
   const [panY, setPanY] = useState(0);
   const [zoom, setZoom] = useState(1.0);
   const [selectedElementId, setSelectedElementId] = useState(null);
+  const [selectedElementType, setSelectedElementType] = useState(null);
   const [selectedStrokeIndex, setSelectedStrokeIndex] = useState(null);
 
-  // Undo / Redo history for active page: array of { strokes, images }
+  // Active inline editors & schema connector mode
+  const [editingTextId, setEditingTextId] = useState(null);
+  const [editingCell, setEditingCell] = useState(null);
+  const [schemaEditorId, setSchemaEditorId] = useState(null);
+  const [connectingFromId, setConnectingFromId] = useState(null);
+
+  // Undo / Redo history for active page
   const [undoStack, setUndoStack] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
 
@@ -198,14 +232,37 @@ export default function App() {
     };
   }, [notebooks, trash, isLoaded, showToast]);
 
-  // Derived active notebook and page
+  // Derived active notebook, page, and selected elements
   const activeNotebook = notebooks.find((nb) => nb.id === activeNotebookId) || null;
   const activePage = activeNotebook?.pages.find((p) => p.id === activePageId) || null;
   const activePageIndex = activeNotebook
     ? activeNotebook.pages.findIndex((p) => p.id === activePageId)
     : -1;
+
   const selectedImage =
-    activePage?.images?.find((img) => img.id === selectedElementId) || null;
+    (!selectedElementType || selectedElementType === 'image')
+      ? activePage?.images?.find((img) => img.id === selectedElementId) || null
+      : null;
+  const selectedText =
+    selectedElementType === 'text'
+      ? activePage?.texts?.find((t) => t.id === selectedElementId) || null
+      : null;
+  const selectedTable =
+    selectedElementType === 'table'
+      ? activePage?.tables?.find((t) => t.id === selectedElementId) || null
+      : null;
+  const selectedSchema =
+    selectedElementType === 'schema'
+      ? activePage?.schemas?.find((s) => s.id === selectedElementId) || null
+      : null;
+  const selectedRelation =
+    selectedElementType === 'relation'
+      ? activePage?.relations?.find((r) => r.id === selectedElementId) || null
+      : null;
+  const editingSchema =
+    schemaEditorId
+      ? activePage?.schemas?.find((s) => s.id === schemaEditorId) || null
+      : null;
 
   // Helper to update the active page cleanly
   const mutateActivePage = useCallback(
@@ -229,35 +286,28 @@ export default function App() {
   );
 
   // Push current page state to undo stack before mutating
-  const pushUndoSnapshot = useCallback(
-    (page) => {
-      if (!page) return;
-      const snapshot = {
-        strokes: page.strokes || [],
-        images: page.images || [],
-      };
-      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snapshot]);
-      setRedoStack([]);
-    },
-    []
-  );
+  const pushUndoSnapshot = useCallback((page) => {
+    if (!page) return;
+    const snapshot = makeSnapshot(page);
+    setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snapshot]);
+    setRedoStack([]);
+  }, []);
 
   // Undo & Redo
   const handleUndo = useCallback(() => {
     if (!activePage || undoStack.length === 0) return;
     const prevSnapshot = undoStack[undoStack.length - 1];
-    const currentSnapshot = {
-      strokes: activePage.strokes || [],
-      images: activePage.images || [],
-    };
+    const currentSnapshot = makeSnapshot(activePage);
     setUndoStack((prev) => prev.slice(0, -1));
     setRedoStack((prev) => [...prev, currentSnapshot]);
     setSelectedElementId(null);
+    setSelectedElementType(null);
+    setEditingTextId(null);
+    setEditingCell(null);
 
     mutateActivePage((p) => ({
       ...p,
-      strokes: prevSnapshot.strokes,
-      images: prevSnapshot.images,
+      ...prevSnapshot,
       updatedAt: Date.now(),
     }));
   }, [activePage, undoStack, mutateActivePage]);
@@ -265,21 +315,32 @@ export default function App() {
   const handleRedo = useCallback(() => {
     if (!activePage || redoStack.length === 0) return;
     const nextSnapshot = redoStack[redoStack.length - 1];
-    const currentSnapshot = {
-      strokes: activePage.strokes || [],
-      images: activePage.images || [],
-    };
+    const currentSnapshot = makeSnapshot(activePage);
     setRedoStack((prev) => prev.slice(0, -1));
     setUndoStack((prev) => [...prev, currentSnapshot]);
     setSelectedElementId(null);
+    setSelectedElementType(null);
+    setEditingTextId(null);
+    setEditingCell(null);
 
     mutateActivePage((p) => ({
       ...p,
-      strokes: nextSnapshot.strokes,
-      images: nextSnapshot.images,
+      ...nextSnapshot,
       updatedAt: Date.now(),
     }));
   }, [activePage, redoStack, mutateActivePage]);
+
+  // Selection helper
+  const handleSelectStructuredElement = useCallback((type, id) => {
+    setSelectedElementType(type);
+    setSelectedElementId(id);
+    setSelectedStrokeIndex(null);
+  }, []);
+
+  const handleSelectElementCompat = useCallback((id) => {
+    setSelectedElementId(id);
+    setSelectedElementType(id ? 'image' : null);
+  }, []);
 
   // Drawing callbacks
   const handleCommitStroke = useCallback(
@@ -301,19 +362,16 @@ export default function App() {
 
   const preDragImagesRef = useRef(null);
   const preDragStrokesRef = useRef(null);
+  const preDragTextsRef = useRef(null);
+  const preDragTablesRef = useRef(null);
+  const preDragSchemasRef = useRef(null);
 
   const handleUpdateImages = useCallback(
     (nextImages) => {
       if (!preDragImagesRef.current && activePage) {
-        preDragImagesRef.current = {
-          strokes: activePage.strokes || [],
-          images: activePage.images || [],
-        };
+        preDragImagesRef.current = makeSnapshot(activePage);
       }
-      mutateActivePage((p) => ({
-        ...p,
-        images: nextImages,
-      }));
+      mutateActivePage((p) => ({ ...p, images: nextImages }));
     },
     [activePage, mutateActivePage]
   );
@@ -330,15 +388,9 @@ export default function App() {
   const handleUpdateStrokes = useCallback(
     (nextStrokes) => {
       if (!preDragStrokesRef.current && activePage) {
-        preDragStrokesRef.current = {
-          strokes: activePage.strokes || [],
-          images: activePage.images || [],
-        };
+        preDragStrokesRef.current = makeSnapshot(activePage);
       }
-      mutateActivePage((p) => ({
-        ...p,
-        strokes: nextStrokes,
-      }));
+      mutateActivePage((p) => ({ ...p, strokes: nextStrokes }));
     },
     [activePage, mutateActivePage]
   );
@@ -352,6 +404,331 @@ export default function App() {
     }
   }, []);
 
+  // Text callbacks
+  const handleCommitText = useCallback(
+    (newTxt) => {
+      if (!activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        texts: [...(p.texts || []), newTxt],
+        date: formatTimestamp(),
+        updatedAt: Date.now(),
+      }));
+    },
+    [activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleUpdateTexts = useCallback(
+    (nextTexts) => {
+      if (!preDragTextsRef.current && activePage) {
+        preDragTextsRef.current = makeSnapshot(activePage);
+      }
+      mutateActivePage((p) => ({ ...p, texts: nextTexts }));
+    },
+    [activePage, mutateActivePage]
+  );
+
+  const handleCommitTexts = useCallback(() => {
+    if (preDragTextsRef.current) {
+      const snap = preDragTextsRef.current;
+      preDragTextsRef.current = null;
+      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snap]);
+      setRedoStack([]);
+    }
+  }, []);
+
+  const handleDeleteEmptyText = useCallback(
+    (txtId) => {
+      preDragTextsRef.current = null;
+      mutateActivePage((p) => ({
+        ...p,
+        texts: (p.texts || []).filter((t) => t.id !== txtId),
+      }));
+      if (selectedElementId === txtId) {
+        setSelectedElementId(null);
+        setSelectedElementType(null);
+      }
+    },
+    [mutateActivePage, selectedElementId]
+  );
+
+  const handleUpdateSelectedText = useCallback(
+    (updated) => {
+      if (!activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        texts: (p.texts || []).map((t) => (t.id === updated.id ? updated : t)),
+        updatedAt: Date.now(),
+      }));
+    },
+    [activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleToggleTextLock = useCallback(() => {
+    if (!selectedText || !activePage) return;
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      texts: (p.texts || []).map((t) =>
+        t.id === selectedText.id ? { ...t, locked: !t.locked } : t
+      ),
+    }));
+  }, [selectedText, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  const handleDeleteSelectedText = useCallback(() => {
+    if (!selectedText || selectedText.locked || !activePage) return;
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      texts: (p.texts || []).filter((t) => t.id !== selectedText.id),
+    }));
+    setSelectedElementId(null);
+    setSelectedElementType(null);
+  }, [selectedText, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  // Table callbacks
+  const handleCommitTable = useCallback(
+    (newTable) => {
+      if (!activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        tables: [...(p.tables || []), newTable],
+        date: formatTimestamp(),
+        updatedAt: Date.now(),
+      }));
+      setCurrentTool('select');
+    },
+    [activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleUpdateTables = useCallback(
+    (nextTables) => {
+      if (!preDragTablesRef.current && activePage) {
+        preDragTablesRef.current = makeSnapshot(activePage);
+      }
+      mutateActivePage((p) => ({ ...p, tables: nextTables }));
+    },
+    [activePage, mutateActivePage]
+  );
+
+  const handleCommitTables = useCallback(() => {
+    if (preDragTablesRef.current) {
+      const snap = preDragTablesRef.current;
+      preDragTablesRef.current = null;
+      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snap]);
+      setRedoStack([]);
+    }
+  }, []);
+
+  const handleTableAction = useCallback(
+    (action) => {
+      if (!selectedTable || !activePage) return;
+      if (action === 'toggleLock') {
+        pushUndoSnapshot(activePage);
+        mutateActivePage((p) => ({
+          ...p,
+          tables: (p.tables || []).map((t) =>
+            t.id === selectedTable.id ? { ...t, locked: !t.locked } : t
+          ),
+        }));
+        return;
+      }
+      if (selectedTable.locked) return;
+      if (action === 'delete') {
+        pushUndoSnapshot(activePage);
+        mutateActivePage((p) => ({
+          ...p,
+          tables: (p.tables || []).filter((t) => t.id !== selectedTable.id),
+        }));
+        setSelectedElementId(null);
+        setSelectedElementType(null);
+        return;
+      }
+
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        tables: (p.tables || []).map((t) => {
+          if (t.id !== selectedTable.id) return t;
+          const cols = t.colWidths || [130, 130];
+          const rows = t.rows || [['']];
+          if (action === 'addRow') {
+            return { ...t, rows: [...rows, Array.from({ length: cols.length }, () => '')] };
+          }
+          if (action === 'removeRow' && rows.length > 1) {
+            return { ...t, rows: rows.slice(0, -1) };
+          }
+          if (action === 'addCol') {
+            return {
+              ...t,
+              colWidths: [...cols, 130],
+              rows: rows.map((r, rIdx) => [...r, t.headerRow && rIdx === 0 ? `Column ${cols.length + 1}` : '']),
+            };
+          }
+          if (action === 'removeCol' && cols.length > 1) {
+            return {
+              ...t,
+              colWidths: cols.slice(0, -1),
+              rows: rows.map((r) => r.slice(0, -1)),
+            };
+          }
+          if (action === 'toggleHeader') {
+            return { ...t, headerRow: !t.headerRow };
+          }
+          return t;
+        }),
+      }));
+    },
+    [selectedTable, activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  // Schema & Relation callbacks
+  const handleCommitSchema = useCallback(
+    (newSchema) => {
+      if (!activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        schemas: [...(p.schemas || []), newSchema],
+        date: formatTimestamp(),
+        updatedAt: Date.now(),
+      }));
+      setCurrentTool('select');
+      setSchemaEditorId(newSchema.id);
+    },
+    [activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleUpdateSchemas = useCallback(
+    (nextSchemas) => {
+      if (!preDragSchemasRef.current && activePage) {
+        preDragSchemasRef.current = makeSnapshot(activePage);
+      }
+      mutateActivePage((p) => ({ ...p, schemas: nextSchemas }));
+    },
+    [activePage, mutateActivePage]
+  );
+
+  const handleCommitSchemas = useCallback(() => {
+    if (preDragSchemasRef.current) {
+      const snap = preDragSchemasRef.current;
+      preDragSchemasRef.current = null;
+      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snap]);
+      setRedoStack([]);
+    }
+  }, []);
+
+  const handleChangeSchemaFromEditor = useCallback(
+    (updatedSchema) => {
+      mutateActivePage((p) => ({
+        ...p,
+        schemas: (p.schemas || []).map((s) => (s.id === updatedSchema.id ? updatedSchema : s)),
+        updatedAt: Date.now(),
+      }));
+    },
+    [mutateActivePage]
+  );
+
+  const handleToggleSchemaLock = useCallback(() => {
+    if (!selectedSchema || !activePage) return;
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      schemas: (p.schemas || []).map((s) =>
+        s.id === selectedSchema.id ? { ...s, locked: !s.locked } : s
+      ),
+    }));
+  }, [selectedSchema, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  const handleDeleteSelectedSchema = useCallback(() => {
+    if (!selectedSchema || selectedSchema.locked || !activePage) return;
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      schemas: (p.schemas || []).filter((s) => s.id !== selectedSchema.id),
+      relations: (p.relations || []).filter(
+        (r) => r.fromId !== selectedSchema.id && r.toId !== selectedSchema.id
+      ),
+    }));
+    if (schemaEditorId === selectedSchema.id) setSchemaEditorId(null);
+    setSelectedElementId(null);
+    setSelectedElementType(null);
+  }, [selectedSchema, activePage, pushUndoSnapshot, mutateActivePage, schemaEditorId]);
+
+  const handleStartConnectSchema = useCallback((fromId) => {
+    setConnectingFromId(fromId);
+    setCurrentTool('select');
+  }, []);
+
+  const handleCompleteConnect = useCallback(
+    (toSchemaId) => {
+      const fromId = connectingFromId;
+      setConnectingFromId(null);
+      if (!toSchemaId || !fromId || toSchemaId === fromId || !activePage) return;
+
+      const newRelation = {
+        id: createId(),
+        fromId,
+        toId: toSchemaId,
+        fromSide: 'auto',
+        toSide: 'auto',
+        cardinality: '1:N',
+        label: '',
+        color: currentColor,
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        relations: [...(p.relations || []), newRelation],
+        updatedAt: Date.now(),
+      }));
+      handleSelectStructuredElement('relation', newRelation.id);
+      showToast('Connected schema tables (1:N)');
+    },
+    [connectingFromId, activePage, currentColor, pushUndoSnapshot, mutateActivePage, handleSelectStructuredElement, showToast]
+  );
+
+  const handleUpdateRelation = useCallback(
+    (updatedRel) => {
+      if (!activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        relations: (p.relations || []).map((r) => (r.id === updatedRel.id ? updatedRel : r)),
+        updatedAt: Date.now(),
+      }));
+    },
+    [activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleDeleteSelectedRelation = useCallback(() => {
+    if (!selectedRelation || !activePage) return;
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      relations: (p.relations || []).filter((r) => r.id !== selectedRelation.id),
+    }));
+    setSelectedElementId(null);
+    setSelectedElementType(null);
+  }, [selectedRelation, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  const handleCopyAllSql = useCallback(() => {
+    const schemas = activePage?.schemas || [];
+    if (schemas.length === 0) {
+      showToast('Add a Schema table to the page first');
+      return;
+    }
+    const sql = generateAllSchemasSql(schemas, activePage?.relations || []);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(sql).then(() => {
+        showToast(`Copied SQL for ${schemas.length} table${schemas.length > 1 ? 's' : ''}`);
+      });
+    }
+  }, [activePage, showToast]);
+
   const handleDeleteSelectedStroke = useCallback(() => {
     if (selectedStrokeIndex === null || !activePage) return;
     pushUndoSnapshot(activePage);
@@ -362,14 +739,11 @@ export default function App() {
     setSelectedStrokeIndex(null);
   }, [selectedStrokeIndex, activePage, pushUndoSnapshot, mutateActivePage]);
 
-  const handlePanZoomChange = useCallback(
-    (nextPanX, nextPanY, nextZoom) => {
-      setPanX(nextPanX);
-      setPanY(nextPanY);
-      setZoom(nextZoom);
-    },
-    []
-  );
+  const handlePanZoomChange = useCallback((nextPanX, nextPanY, nextZoom) => {
+    setPanX(nextPanX);
+    setPanY(nextPanY);
+    setZoom(nextZoom);
+  }, []);
 
   const handleZoomStep = useCallback((delta) => {
     setZoom((prev) => Math.min(5, Math.max(0.2, Math.round((prev + delta) * 100) / 100)));
@@ -411,7 +785,7 @@ export default function App() {
             images: [...(p.images || []), newImg],
             updatedAt: Date.now(),
           }));
-          setSelectedElementId(newImg.id);
+          handleSelectStructuredElement('image', newImg.id);
           setCurrentTool('select');
           showToast('Image added to page');
         };
@@ -420,7 +794,7 @@ export default function App() {
       reader.readAsDataURL(file);
       e.target.value = '';
     },
-    [activePage, panX, panY, pushUndoSnapshot, mutateActivePage, showToast]
+    [activePage, panX, panY, pushUndoSnapshot, mutateActivePage, handleSelectStructuredElement, showToast]
   );
 
   const handleToggleImageLock = useCallback(() => {
@@ -444,19 +818,34 @@ export default function App() {
       images: (p.images || []).filter((i) => i.id !== selectedElementId),
     }));
     setSelectedElementId(null);
+    setSelectedElementType(null);
   }, [selectedElementId, activePage, pushUndoSnapshot, mutateActivePage]);
 
   const handleClearPage = useCallback(() => {
     if (!activePage) return;
-    if ((activePage.strokes?.length || 0) === 0 && (activePage.images?.length || 0) === 0) return;
+    const isEmpty =
+      (activePage.strokes?.length || 0) === 0 &&
+      (activePage.images?.length || 0) === 0 &&
+      (activePage.texts?.length || 0) === 0 &&
+      (activePage.tables?.length || 0) === 0 &&
+      (activePage.schemas?.length || 0) === 0 &&
+      (activePage.relations?.length || 0) === 0;
+    if (isEmpty) return;
+
     pushUndoSnapshot(activePage);
     mutateActivePage((p) => ({
       ...p,
       strokes: [],
       images: [],
+      texts: [],
+      tables: [],
+      schemas: [],
+      relations: [],
       updatedAt: Date.now(),
     }));
     setSelectedElementId(null);
+    setSelectedElementType(null);
+    setSchemaEditorId(null);
     showToast('Page cleared', 'Undo', handleUndo);
   }, [activePage, pushUndoSnapshot, mutateActivePage, showToast, handleUndo]);
 
@@ -469,6 +858,11 @@ export default function App() {
     setUndoStack([]);
     setRedoStack([]);
     setSelectedElementId(null);
+    setSelectedElementType(null);
+    setEditingTextId(null);
+    setEditingCell(null);
+    setSchemaEditorId(null);
+    setConnectingFromId(null);
   }, []);
 
   const handleCreateNotebook = useCallback(
@@ -529,7 +923,6 @@ export default function App() {
                 : nb
             );
           }
-          // Fallback: create a notebook to hold the restored page
           const recoveredNb = {
             id: createId(),
             title: 'Recovered Notes',
@@ -638,6 +1031,10 @@ export default function App() {
         updatedAt: Date.now(),
         strokes: JSON.parse(JSON.stringify(src.strokes || [])),
         images: JSON.parse(JSON.stringify(src.images || [])),
+        texts: JSON.parse(JSON.stringify(src.texts || [])),
+        tables: JSON.parse(JSON.stringify(src.tables || [])),
+        schemas: JSON.parse(JSON.stringify(src.schemas || [])),
+        relations: JSON.parse(JSON.stringify(src.relations || [])),
       };
       setNotebooks((prev) =>
         prev.map((nb) => {
@@ -833,15 +1230,38 @@ export default function App() {
       if (e.key === 'Escape') {
         setExportModalOpen(false);
         setSettingsModalOpen(false);
+        setSchemaEditorId(null);
+        setConnectingFromId(null);
         setSelectedElementId(null);
+        setSelectedElementType(null);
         setSelectedStrokeIndex(null);
         if (focusMode) setFocusMode(false);
         return;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && currentTool === 'select') {
-        if (selectedElementId) {
+        if (selectedImage) {
           e.preventDefault();
           handleDeleteSelectedImage();
+          return;
+        }
+        if (selectedText) {
+          e.preventDefault();
+          handleDeleteSelectedText();
+          return;
+        }
+        if (selectedTable) {
+          e.preventDefault();
+          handleTableAction('delete');
+          return;
+        }
+        if (selectedSchema) {
+          e.preventDefault();
+          handleDeleteSelectedSchema();
+          return;
+        }
+        if (selectedRelation) {
+          e.preventDefault();
+          handleDeleteSelectedRelation();
           return;
         }
         if (selectedStrokeIndex !== null) {
@@ -857,6 +1277,9 @@ export default function App() {
       else if (key === 'c') setCurrentTool('pencil');
       else if (key === 'h') setCurrentTool('highlighter');
       else if (key === 's') setCurrentTool('shape');
+      else if (key === 't') setCurrentTool('text');
+      else if (key === 'g') setCurrentTool('table');
+      else if (key === 'd') setCurrentTool('schema');
       else if (key === 'e') setCurrentTool('eraser');
       else if (key === 'v') setCurrentTool('select');
       else if (key === 'f') setFocusMode((prev) => !prev);
@@ -879,10 +1302,18 @@ export default function App() {
     handleUndo,
     handleRedo,
     handleDeleteSelectedImage,
+    handleDeleteSelectedText,
+    handleTableAction,
+    handleDeleteSelectedSchema,
+    handleDeleteSelectedRelation,
     handleDeleteSelectedStroke,
     handleZoomStep,
     handleResetView,
-    selectedElementId,
+    selectedImage,
+    selectedText,
+    selectedTable,
+    selectedSchema,
+    selectedRelation,
     selectedStrokeIndex,
     currentTool,
     focusMode,
@@ -890,8 +1321,10 @@ export default function App() {
 
   const handleSelectTool = useCallback((tool) => {
     setCurrentTool(tool);
+    setConnectingFromId(null);
     if (tool !== 'select') {
       setSelectedElementId(null);
+      setSelectedElementType(null);
       setSelectedStrokeIndex(null);
     }
   }, []);
@@ -970,6 +1403,9 @@ export default function App() {
                 shapeType={shapeType}
                 strokeStyle={strokeStyle}
                 shapeFill={shapeFill}
+                textStyle={textStyle}
+                tablePreset={tablePreset}
+                schemaTemplate={schemaTemplate}
                 pressureEnabled={pressureEnabled}
                 shapeDetectionEnabled={shapeDetectionEnabled}
                 stylusOnly={stylusOnly}
@@ -977,14 +1413,34 @@ export default function App() {
                 darkMode={darkMode}
                 spacePressed={spacePressed}
                 selectedElementId={selectedElementId}
+                selectedElementType={selectedElementType}
                 selectedStrokeIndex={selectedStrokeIndex}
-                onSelectElement={setSelectedElementId}
+                editingTextId={editingTextId}
+                editingCell={editingCell}
+                connectingFromId={connectingFromId}
+                onSelectElement={handleSelectElementCompat}
+                onSelectStructuredElement={handleSelectStructuredElement}
                 onSelectStroke={setSelectedStrokeIndex}
+                onSetEditingTextId={setEditingTextId}
+                onSetEditingCell={setEditingCell}
+                onOpenSchemaEditor={(id) => setSchemaEditorId(id)}
+                onStartConnectSchema={handleStartConnectSchema}
+                onCompleteConnect={handleCompleteConnect}
                 onCommitStroke={handleCommitStroke}
                 onUpdateImages={handleUpdateImages}
                 onCommitImages={handleCommitImages}
                 onUpdateStrokes={handleUpdateStrokes}
                 onCommitStrokes={handleCommitStrokes}
+                onCommitText={handleCommitText}
+                onUpdateTexts={handleUpdateTexts}
+                onCommitTexts={handleCommitTexts}
+                onDeleteEmptyText={handleDeleteEmptyText}
+                onCommitTable={handleCommitTable}
+                onUpdateTables={handleUpdateTables}
+                onCommitTables={handleCommitTables}
+                onCommitSchema={handleCommitSchema}
+                onUpdateSchemas={handleUpdateSchemas}
+                onCommitSchemas={handleCommitSchemas}
                 imageCache={imageCacheRef.current}
                 canvasSizeRef={canvasSizeRef}
               />
@@ -1004,15 +1460,53 @@ export default function App() {
                 onChangeStrokeStyle={setStrokeStyle}
                 shapeFill={shapeFill}
                 onToggleShapeFill={() => setShapeFill((prev) => !prev)}
+                textStyle={textStyle}
+                onChangeTextStyle={setTextStyle}
+                tablePreset={tablePreset}
+                onChangeTablePreset={setTablePreset}
+                schemaTemplate={schemaTemplate}
+                onChangeSchemaTemplate={setSchemaTemplate}
+                onCopyAllSql={handleCopyAllSql}
                 darkMode={darkMode}
                 onUploadImage={handleUploadImage}
                 onClearPage={handleClearPage}
                 selectedImage={selectedImage}
+                selectedText={selectedText}
+                selectedTable={selectedTable}
+                selectedSchema={selectedSchema}
+                selectedRelation={selectedRelation}
                 selectedStrokeIndex={selectedStrokeIndex}
                 onToggleImageLock={handleToggleImageLock}
                 onDeleteSelectedImage={handleDeleteSelectedImage}
                 onDeleteSelectedStroke={handleDeleteSelectedStroke}
+                onUpdateSelectedText={handleUpdateSelectedText}
+                onToggleTextLock={handleToggleTextLock}
+                onDeleteSelectedText={handleDeleteSelectedText}
+                onTableAction={handleTableAction}
+                onOpenSchemaEditor={() => selectedSchema && setSchemaEditorId(selectedSchema.id)}
+                onStartConnectSchema={handleStartConnectSchema}
+                onToggleSchemaLock={handleToggleSchemaLock}
+                onDeleteSelectedSchema={handleDeleteSelectedSchema}
+                onUpdateRelation={handleUpdateRelation}
+                onDeleteSelectedRelation={handleDeleteSelectedRelation}
+                connectingFromId={connectingFromId}
+                onCancelConnect={() => setConnectingFromId(null)}
               />
+
+              {editingSchema && (
+                <SchemaEditorPanel
+                  schema={editingSchema}
+                  allSchemas={activePage.schemas || []}
+                  relations={activePage.relations || []}
+                  onChange={handleChangeSchemaFromEditor}
+                  onClose={() => setSchemaEditorId(null)}
+                  onStartConnect={(id) => {
+                    setSchemaEditorId(null);
+                    handleStartConnectSchema(id);
+                  }}
+                  onCopySql={() => showToast(`Copied SQL for "${editingSchema.name}"`)}
+                />
+              )}
 
               {focusMode && (
                 <div className="sp-focus-exit">

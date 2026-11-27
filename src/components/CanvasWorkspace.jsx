@@ -4,11 +4,21 @@ import {
   renderStroke,
   renderLiveSegment,
   smoothPoint,
+  resolveStrokeColor,
 } from '../utils/drawingEngine';
 import {
   detectShapeAndStraighten,
   buildShapePoints,
 } from '../utils/shapeDetection';
+import {
+  FONT_FAMILIES,
+  getTextMetrics,
+  getTableMetrics,
+  hitTestTableCell,
+  getSchemaMetrics,
+  hitTestRelation,
+} from '../utils/structuredElements';
+import { createId } from '../utils/storage';
 
 function getStrokeBoundingBox(stroke) {
   if (!stroke?.points || stroke.points.length === 0) return null;
@@ -59,6 +69,74 @@ function hitTestStroke(stroke, worldX, worldY, tolerance) {
   return false;
 }
 
+function buildStarterSchema(templateId, x, y, color) {
+  if (templateId === 'users') {
+    return {
+      id: createId(),
+      x,
+      y,
+      width: 260,
+      name: 'users',
+      color,
+      locked: false,
+      fields: [
+        { id: createId(), name: 'id', type: 'uuid', isPK: true, isFK: false, isNullable: false, isUnique: true },
+        { id: createId(), name: 'email', type: 'varchar', isPK: false, isFK: false, isNullable: false, isUnique: true },
+        { id: createId(), name: 'full_name', type: 'varchar', isPK: false, isFK: false, isNullable: false, isUnique: false },
+        { id: createId(), name: 'created_at', type: 'timestamp', isPK: false, isFK: false, isNullable: false, isUnique: false },
+      ],
+    };
+  }
+  if (templateId === 'orders') {
+    return {
+      id: createId(),
+      x,
+      y,
+      width: 260,
+      name: 'orders',
+      color,
+      locked: false,
+      fields: [
+        { id: createId(), name: 'id', type: 'uuid', isPK: true, isFK: false, isNullable: false, isUnique: true },
+        { id: createId(), name: 'user_id', type: 'uuid', isPK: false, isFK: true, isNullable: false, isUnique: false },
+        { id: createId(), name: 'total_cents', type: 'int', isPK: false, isFK: false, isNullable: false, isUnique: false },
+        { id: createId(), name: 'status', type: 'varchar', isPK: false, isFK: false, isNullable: false, isUnique: false },
+      ],
+    };
+  }
+  if (templateId === 'posts') {
+    return {
+      id: createId(),
+      x,
+      y,
+      width: 260,
+      name: 'posts',
+      color,
+      locked: false,
+      fields: [
+        { id: createId(), name: 'id', type: 'serial', isPK: true, isFK: false, isNullable: false, isUnique: true },
+        { id: createId(), name: 'author_id', type: 'uuid', isPK: false, isFK: true, isNullable: false, isUnique: false },
+        { id: createId(), name: 'title', type: 'varchar', isPK: false, isFK: false, isNullable: false, isUnique: false },
+        { id: createId(), name: 'published', type: 'boolean', isPK: false, isFK: false, isNullable: false, isUnique: false },
+      ],
+    };
+  }
+  return {
+    id: createId(),
+    x,
+    y,
+    width: 256,
+    name: 'new_table',
+    color,
+    locked: false,
+    fields: [
+      { id: createId(), name: 'id', type: 'uuid', isPK: true, isFK: false, isNullable: false, isUnique: true },
+      { id: createId(), name: 'name', type: 'varchar', isPK: false, isFK: false, isNullable: false, isUnique: false },
+      { id: createId(), name: 'created_at', type: 'timestamp', isPK: false, isFK: false, isNullable: false, isUnique: false },
+    ],
+  };
+}
+
 export default function CanvasWorkspace({
   page,
   panX,
@@ -72,6 +150,9 @@ export default function CanvasWorkspace({
   shapeType,
   strokeStyle,
   shapeFill,
+  textStyle,
+  tablePreset,
+  schemaTemplate,
   pressureEnabled,
   shapeDetectionEnabled,
   stylusOnly,
@@ -79,26 +160,50 @@ export default function CanvasWorkspace({
   darkMode,
   spacePressed,
   selectedElementId,
+  selectedElementType,
   selectedStrokeIndex,
+  editingTextId,
+  editingCell,
+  connectingFromId,
   onSelectElement,
+  onSelectStructuredElement,
   onSelectStroke,
+  onSetEditingTextId,
+  onSetEditingCell,
+  onOpenSchemaEditor,
+  onStartConnectSchema,
+  onCompleteConnect,
   onCommitStroke,
   onUpdateImages,
   onCommitImages,
   onUpdateStrokes,
   onCommitStrokes,
+  onCommitText,
+  onUpdateTexts,
+  onCommitTexts,
+  onDeleteEmptyText,
+  onCommitTable,
+  onUpdateTables,
+  onCommitTables,
+  onCommitSchema,
+  onUpdateSchemas,
+  onCommitSchemas,
   imageCache,
   canvasSizeRef,
 }) {
   const containerRef = useRef(null);
   const baseCanvasRef = useRef(null);
   const liveCanvasRef = useRef(null);
+  const textEditorRef = useRef(null);
+  const cellEditorRef = useRef(null);
 
   const isDrawingRef = useRef(false);
   const isPanningRef = useRef(false);
   const isMovingImgRef = useRef(false);
   const isResizingImgRef = useRef(null);
   const isMovingStrokeRef = useRef(false);
+  const isMovingStructuredRef = useRef(null); // { type: 'text'|'table'|'schema', id }
+  const isResizingStructuredRef = useRef(null); // { type: 'text'|'table'|'schema', id, dir }
   const activeStrokeRef = useRef(null);
   const shapeStartRef = useRef(null);
   const lastPointerRef = useRef({ x: 0, y: 0 });
@@ -119,6 +224,9 @@ export default function CanvasWorkspace({
     shapeType,
     strokeStyle,
     shapeFill,
+    textStyle,
+    tablePreset,
+    schemaTemplate,
     pressureEnabled,
     shapeDetectionEnabled,
     stylusOnly,
@@ -126,7 +234,11 @@ export default function CanvasWorkspace({
     darkMode,
     spacePressed,
     selectedElementId,
+    selectedElementType,
     selectedStrokeIndex,
+    editingTextId,
+    editingCell,
+    connectingFromId,
   };
 
   const syncCanvasDimensions = useCallback(() => {
@@ -165,7 +277,6 @@ export default function CanvasWorkspace({
     lCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
   }, []);
 
-  // Renders static committed page (paper + images + committed strokes + selection box)
   const renderBaseCanvas = useCallback(
     (includeActiveEraser = false) => {
       const dims = syncCanvasDimensions();
@@ -182,6 +293,10 @@ export default function CanvasWorkspace({
         includePaper: true,
         imageCache,
         selectedElementId: s.selectedElementId,
+        selectedElementType: s.selectedElementType,
+        editingTextId: s.editingTextId,
+        editingCell: s.editingCell,
+        showSchemaAnchors: Boolean(s.connectingFromId),
         activeStroke: includeActiveEraser ? activeStrokeRef.current : null,
         onImageLoad: () => renderBaseCanvas(false),
       });
@@ -213,7 +328,6 @@ export default function CanvasWorkspace({
     [syncCanvasDimensions, imageCache]
   );
 
-  // Immediately paints the newest live stroke segment onto the overlay canvas (zero frame lag)
   const paintLiveIncremental = useCallback((stroke) => {
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas || !stroke) return;
@@ -229,7 +343,6 @@ export default function CanvasWorkspace({
     lCtx.restore();
   }, []);
 
-  // Paints a full live stroke (used for Shape preview and Highlighter so alpha doesn't double-blend)
   const paintLiveFullStroke = useCallback((stroke) => {
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas || !stroke) return;
@@ -248,12 +361,23 @@ export default function CanvasWorkspace({
     lCtx.restore();
   }, []);
 
-  // Redraw base layer when page, pan/zoom, theme, or selection updates
   useEffect(() => {
     renderBaseCanvas(false);
-  }, [page, panX, panY, zoom, darkMode, selectedElementId, selectedStrokeIndex, renderBaseCanvas]);
+  }, [
+    page,
+    panX,
+    panY,
+    zoom,
+    darkMode,
+    selectedElementId,
+    selectedElementType,
+    selectedStrokeIndex,
+    editingTextId,
+    editingCell,
+    connectingFromId,
+    renderBaseCanvas,
+  ]);
 
-  // Observe container resize & clean up stale pointers on window blur
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -268,6 +392,8 @@ export default function CanvasWorkspace({
       isMovingImgRef.current = false;
       isResizingImgRef.current = null;
       isMovingStrokeRef.current = false;
+      isMovingStructuredRef.current = null;
+      isResizingStructuredRef.current = null;
       clearLiveCanvas();
     };
     window.addEventListener('blur', handleBlur);
@@ -282,7 +408,6 @@ export default function CanvasWorkspace({
     };
   }, [renderBaseCanvas, clearLiveCanvas]);
 
-  // Trackpad two-finger infinite pan & pinch-to-zoom
   useEffect(() => {
     const canvas = liveCanvasRef.current;
     if (!canvas) return;
@@ -315,6 +440,22 @@ export default function CanvasWorkspace({
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [onPanZoomChange]);
 
+  // Auto-focus inline text editor when editingTextId changes
+  useEffect(() => {
+    if (editingTextId && textEditorRef.current) {
+      const el = textEditorRef.current;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, [editingTextId]);
+
+  useEffect(() => {
+    if (editingCell && cellEditorRef.current) {
+      cellEditorRef.current.focus();
+      cellEditorRef.current.select();
+    }
+  }, [editingCell]);
+
   const toWorld = (clientX, clientY) => {
     const rect = liveCanvasRef.current.getBoundingClientRect();
     const s = stateRef.current;
@@ -331,6 +472,49 @@ export default function CanvasWorkspace({
       return e.pressure > 0 ? Math.max(0.15, Math.min(1.4, e.pressure * 1.25)) : 0.75;
     }
     return 0.75;
+  };
+
+  const findHitText = (world) => {
+    const ctx = baseCanvasRef.current?.getContext('2d');
+    if (!ctx) return null;
+    const texts = stateRef.current.page?.texts || [];
+    return [...texts].reverse().find((txt) => {
+      const m = getTextMetrics(ctx, txt);
+      return (
+        world.x >= txt.x &&
+        world.x <= txt.x + m.width &&
+        world.y >= txt.y &&
+        world.y <= txt.y + m.height
+      );
+    });
+  };
+
+  const findHitTable = (world) => {
+    const ctx = baseCanvasRef.current?.getContext('2d');
+    if (!ctx) return null;
+    const tables = stateRef.current.page?.tables || [];
+    return [...tables].reverse().find((tbl) => {
+      const m = getTableMetrics(ctx, tbl);
+      return (
+        world.x >= tbl.x &&
+        world.x <= tbl.x + m.totalWidth &&
+        world.y >= tbl.y &&
+        world.y <= tbl.y + m.totalHeight
+      );
+    });
+  };
+
+  const findHitSchema = (world) => {
+    const schemas = stateRef.current.page?.schemas || [];
+    return [...schemas].reverse().find((sch) => {
+      const m = getSchemaMetrics(sch);
+      return (
+        world.x >= sch.x &&
+        world.x <= sch.x + m.width &&
+        world.y >= sch.y &&
+        world.y <= sch.y + m.height
+      );
+    });
   };
 
   const handlePointerDown = (e) => {
@@ -388,12 +572,145 @@ export default function CanvasWorkspace({
 
     const world = toWorld(e.clientX, e.clientY);
 
+    // Handle schema connection mode
+    if (s.connectingFromId) {
+      const targetSchema = findHitSchema(world);
+      if (targetSchema && targetSchema.id !== s.connectingFromId) {
+        onCompleteConnect(targetSchema.id);
+      } else {
+        onCompleteConnect(null);
+      }
+      return;
+    }
+
+    // Text Tool: click existing text to edit, or click empty space to create new text box
+    if (s.currentTool === 'text') {
+      const hitTxt = findHitText(world);
+      if (hitTxt) {
+        onSelectStructuredElement('text', hitTxt.id);
+        onSetEditingTextId(hitTxt.id);
+        return;
+      }
+      const newTxt = {
+        id: createId(),
+        x: world.x,
+        y: world.y,
+        width: 240,
+        text: '',
+        color: s.currentColor,
+        fontSize: s.textStyle?.fontSize || 18,
+        fontFamily: s.textStyle?.fontFamily || 'sans',
+        fontWeight: s.textStyle?.fontWeight || 'normal',
+        fontStyle: s.textStyle?.fontStyle || 'normal',
+        textAlign: s.textStyle?.textAlign || 'left',
+        locked: false,
+      };
+      onCommitText(newTxt);
+      onSelectStructuredElement('text', newTxt.id);
+      onSetEditingTextId(newTxt.id);
+      return;
+    }
+
+    // Table Tool: click existing table cell to edit, or click empty space to place new table
+    if (s.currentTool === 'table') {
+      const hitTbl = findHitTable(world);
+      if (hitTbl) {
+        onSelectStructuredElement('table', hitTbl.id);
+        const ctx = baseCanvasRef.current?.getContext('2d');
+        const cell = ctx ? hitTestTableCell(ctx, hitTbl, world.x, world.y) : null;
+        if (cell) onSetEditingCell({ tableId: hitTbl.id, row: cell.row, col: cell.col });
+        return;
+      }
+      const rCount = s.tablePreset?.rows || 3;
+      const cCount = s.tablePreset?.cols || 3;
+      const headerRow = s.tablePreset?.headerRow ?? true;
+      const rows = Array.from({ length: rCount }, (_, r) =>
+        Array.from({ length: cCount }, (_, c) =>
+          headerRow && r === 0 ? `Column ${c + 1}` : ''
+        )
+      );
+      const newTable = {
+        id: createId(),
+        x: world.x,
+        y: world.y,
+        colWidths: Array.from({ length: cCount }, () => 130),
+        rowHeight: 34,
+        rows,
+        headerRow,
+        color: s.currentColor,
+        locked: false,
+      };
+      onCommitTable(newTable);
+      onSelectStructuredElement('table', newTable.id);
+      return;
+    }
+
+    // Schema Tool: click existing schema to select/edit, or click empty space to place new entity
+    if (s.currentTool === 'schema') {
+      const hitSch = findHitSchema(world);
+      if (hitSch) {
+        onSelectStructuredElement('schema', hitSch.id);
+        onOpenSchemaEditor(hitSch.id);
+        return;
+      }
+      const newSchema = buildStarterSchema(s.schemaTemplate, world.x, world.y, s.currentColor);
+      onCommitSchema(newSchema);
+      onSelectStructuredElement('schema', newSchema.id);
+      return;
+    }
+
     if (s.currentTool === 'select') {
+      const ctx = baseCanvasRef.current?.getContext('2d');
+      const hitRadius = 12 / s.zoom;
+
+      // 1. Check resize handles / anchor ports on currently selected structured element
+      if (s.selectedElementId && s.selectedElementType === 'schema') {
+        const sch = (s.page.schemas || []).find((i) => i.id === s.selectedElementId);
+        if (sch && !sch.locked) {
+          const m = getSchemaMetrics(sch);
+          for (const pt of Object.values(m.anchors)) {
+            if (Math.hypot(world.x - pt.x, world.y - pt.y) <= hitRadius) {
+              onStartConnectSchema(sch.id);
+              return;
+            }
+          }
+        }
+      }
+
+      if (s.selectedElementId && s.selectedElementType === 'text' && ctx) {
+        const txt = (s.page.texts || []).find((i) => i.id === s.selectedElementId);
+        if (txt && !txt.locked) {
+          const m = getTextMetrics(ctx, txt);
+          if (
+            Math.abs(world.x - (txt.x + m.width)) <= hitRadius &&
+            world.y >= txt.y - hitRadius &&
+            world.y <= txt.y + m.height + hitRadius
+          ) {
+            isResizingStructuredRef.current = { type: 'text', id: txt.id, dir: 'e' };
+            return;
+          }
+        }
+      }
+
+      if (s.selectedElementId && s.selectedElementType === 'table' && ctx) {
+        const tbl = (s.page.tables || []).find((i) => i.id === s.selectedElementId);
+        if (tbl && !tbl.locked) {
+          const m = getTableMetrics(ctx, tbl);
+          if (
+            Math.abs(world.x - (tbl.x + m.totalWidth)) <= hitRadius &&
+            Math.abs(world.y - (tbl.y + m.totalHeight)) <= hitRadius
+          ) {
+            isResizingStructuredRef.current = { type: 'table', id: tbl.id, dir: 'se' };
+            return;
+          }
+        }
+      }
+
+      // 2. Check resize handles on selected image
       const images = s.page.images || [];
-      if (s.selectedElementId) {
+      if (s.selectedElementId && (!s.selectedElementType || s.selectedElementType === 'image')) {
         const img = images.find((i) => i.id === s.selectedElementId);
         if (img && !img.locked) {
-          const hitRadius = 12 / s.zoom;
           const handles = {
             nw: { x: img.x, y: img.y },
             ne: { x: img.x + img.width, y: img.y },
@@ -412,6 +729,34 @@ export default function CanvasWorkspace({
         }
       }
 
+      // 3. Hit-test Texts
+      const hitTxt = findHitText(world);
+      if (hitTxt) {
+        onSelectStroke(null);
+        onSelectStructuredElement('text', hitTxt.id);
+        if (!hitTxt.locked) isMovingStructuredRef.current = { type: 'text', id: hitTxt.id };
+        return;
+      }
+
+      // 4. Hit-test Schemas
+      const hitSch = findHitSchema(world);
+      if (hitSch) {
+        onSelectStroke(null);
+        onSelectStructuredElement('schema', hitSch.id);
+        if (!hitSch.locked) isMovingStructuredRef.current = { type: 'schema', id: hitSch.id };
+        return;
+      }
+
+      // 5. Hit-test Tables
+      const hitTbl = findHitTable(world);
+      if (hitTbl) {
+        onSelectStroke(null);
+        onSelectStructuredElement('table', hitTbl.id);
+        if (!hitTbl.locked) isMovingStructuredRef.current = { type: 'table', id: hitTbl.id };
+        return;
+      }
+
+      // 6. Hit-test Images
       const hitImg = [...images]
         .reverse()
         .find(
@@ -424,13 +769,26 @@ export default function CanvasWorkspace({
 
       if (hitImg) {
         onSelectStroke(null);
-        onSelectElement(hitImg.id);
+        onSelectStructuredElement('image', hitImg.id);
         if (!hitImg.locked) {
           isMovingImgRef.current = true;
         }
         return;
       }
 
+      // 7. Hit-test Schema Relations
+      const relations = s.page.relations || [];
+      const schemas = s.page.schemas || [];
+      const hitRel = [...relations]
+        .reverse()
+        .find((rel) => hitTestRelation(rel, schemas, world.x, world.y, 12 / s.zoom));
+      if (hitRel) {
+        onSelectStroke(null);
+        onSelectStructuredElement('relation', hitRel.id);
+        return;
+      }
+
+      // 8. Hit-test Strokes
       const strokes = s.page.strokes || [];
       const tolerance = 12 / s.zoom;
       for (let i = strokes.length - 1; i >= 0; i--) {
@@ -497,6 +855,36 @@ export default function CanvasWorkspace({
     }
   };
 
+  const handleDoubleClick = (e) => {
+    const s = stateRef.current;
+    if (!s.page) return;
+    const world = toWorld(e.clientX, e.clientY);
+
+    const hitTxt = findHitText(world);
+    if (hitTxt && !hitTxt.locked) {
+      onSelectStructuredElement('text', hitTxt.id);
+      onSetEditingTextId(hitTxt.id);
+      return;
+    }
+
+    const hitTbl = findHitTable(world);
+    if (hitTbl && !hitTbl.locked) {
+      onSelectStructuredElement('table', hitTbl.id);
+      const ctx = baseCanvasRef.current?.getContext('2d');
+      const cell = ctx ? hitTestTableCell(ctx, hitTbl, world.x, world.y) : null;
+      if (cell) {
+        onSetEditingCell({ tableId: hitTbl.id, row: cell.row, col: cell.col });
+      }
+      return;
+    }
+
+    const hitSch = findHitSchema(world);
+    if (hitSch && !hitSch.locked) {
+      onSelectStructuredElement('schema', hitSch.id);
+      onOpenSchemaEditor(hitSch.id);
+    }
+  };
+
   const handlePointerMove = (e) => {
     if (!stateRef.current.page) return;
     e.preventDefault();
@@ -541,6 +929,47 @@ export default function CanvasWorkspace({
 
     if (isPanningRef.current) {
       onPanZoomChange(s.panX + dxScreen / s.zoom, s.panY + dyScreen / s.zoom, s.zoom);
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (isMovingStructuredRef.current) {
+      const dx = dxScreen / s.zoom;
+      const dy = dyScreen / s.zoom;
+      const { type, id } = isMovingStructuredRef.current;
+      if (type === 'text') {
+        onUpdateTexts((s.page.texts || []).map((t) => (t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)));
+      } else if (type === 'table') {
+        onUpdateTables((s.page.tables || []).map((t) => (t.id === id ? { ...t, x: t.x + dx, y: t.y + dy } : t)));
+      } else if (type === 'schema') {
+        onUpdateSchemas((s.page.schemas || []).map((sc) => (sc.id === id ? { ...sc, x: sc.x + dx, y: sc.y + dy } : sc)));
+      }
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (isResizingStructuredRef.current) {
+      const dx = dxScreen / s.zoom;
+      const { type, id } = isResizingStructuredRef.current;
+      if (type === 'text') {
+        onUpdateTexts(
+          (s.page.texts || []).map((t) =>
+            t.id === id ? { ...t, width: Math.max(90, (t.width || 240) + dx) } : t
+          )
+        );
+      } else if (type === 'table') {
+        onUpdateTables(
+          (s.page.tables || []).map((t) => {
+            if (t.id !== id) return t;
+            const cols = t.colWidths || [130, 130, 130];
+            const deltaPerCol = dx / cols.length;
+            return {
+              ...t,
+              colWidths: cols.map((w) => Math.max(60, w + deltaPerCol)),
+            };
+          })
+        );
+      }
       lastPointerRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -631,7 +1060,6 @@ export default function CanvasWorkspace({
       pts.push(finalPt);
       added = true;
 
-      // Paint immediately onto the live overlay canvas for zero-latency opaque pen ink
       if (s.currentTool !== 'eraser' && s.currentTool !== 'highlighter' && s.currentTool !== 'pencil') {
         paintLiveIncremental(activeStrokeRef.current);
       }
@@ -659,6 +1087,16 @@ export default function CanvasWorkspace({
 
     if (isPanningRef.current) {
       isPanningRef.current = false;
+      return;
+    }
+
+    if (isMovingStructuredRef.current || isResizingStructuredRef.current) {
+      const ref = isMovingStructuredRef.current || isResizingStructuredRef.current;
+      isMovingStructuredRef.current = null;
+      isResizingStructuredRef.current = null;
+      if (ref.type === 'text') onCommitTexts();
+      else if (ref.type === 'table') onCommitTables();
+      else if (ref.type === 'schema') onCommitSchemas();
       return;
     }
 
@@ -704,11 +1142,64 @@ export default function CanvasWorkspace({
   const cursorMode =
     spacePressed || currentTool === 'pan'
       ? 'pan'
-      : currentTool === 'select'
+      : currentTool === 'text'
+      ? 'text'
+      : currentTool === 'select' || connectingFromId
       ? 'select'
       : currentTool === 'eraser'
       ? 'eraser'
       : 'draw';
+
+  // Compute inline text editor screen box
+  const editingText = editingTextId
+    ? (page?.texts || []).find((t) => t.id === editingTextId)
+    : null;
+  let textEditorStyle = null;
+  if (editingText && baseCanvasRef.current) {
+    const ctx = baseCanvasRef.current.getContext('2d');
+    const metrics = getTextMetrics(ctx, editingText);
+    const resolvedColor = resolveStrokeColor(editingText.color, darkMode, 'pen');
+    textEditorStyle = {
+      left: `${(editingText.x + panX) * zoom}px`,
+      top: `${(editingText.y + panY) * zoom}px`,
+      width: `${metrics.width * zoom}px`,
+      minHeight: `${metrics.height * zoom}px`,
+      padding: `${metrics.padY * zoom}px ${metrics.padX * zoom}px`,
+      fontSize: `${(editingText.fontSize || 18) * zoom}px`,
+      fontFamily: FONT_FAMILIES[editingText.fontFamily] || FONT_FAMILIES.sans,
+      fontWeight: editingText.fontWeight === 'bold' ? 600 : 400,
+      fontStyle: editingText.fontStyle === 'italic' ? 'italic' : 'normal',
+      textAlign: editingText.textAlign || 'left',
+      color: resolvedColor || (darkMode ? '#f8fafc' : '#1e1e1e'),
+    };
+  }
+
+  // Compute inline table cell editor screen box
+  let cellEditorStyle = null;
+  let cellEditorValue = '';
+  if (editingCell && baseCanvasRef.current) {
+    const tbl = (page?.tables || []).find((t) => t.id === editingCell.tableId);
+    if (tbl) {
+      const ctx = baseCanvasRef.current.getContext('2d');
+      const m = getTableMetrics(ctx, tbl);
+      let cx = tbl.x;
+      for (let c = 0; c < editingCell.col; c++) cx += m.colWidths[c] || 130;
+      let cy = tbl.y;
+      for (let r = 0; r < editingCell.row; r++) cy += m.rowHeights[r] || 34;
+      const cw = m.colWidths[editingCell.col] || 130;
+      const ch = m.rowHeights[editingCell.row] || 34;
+      cellEditorValue = tbl.rows?.[editingCell.row]?.[editingCell.col] ?? '';
+      cellEditorStyle = {
+        left: `${(cx + panX) * zoom}px`,
+        top: `${(cy + panY) * zoom}px`,
+        width: `${cw * zoom}px`,
+        height: `${ch * zoom}px`,
+        padding: `${4 * zoom}px ${8 * zoom}px`,
+        fontSize: `${m.fontSize * zoom}px`,
+        fontWeight: tbl.headerRow && editingCell.row === 0 ? 600 : 400,
+      };
+    }
+  }
 
   return (
     <div
@@ -725,7 +1216,105 @@ export default function CanvasWorkspace({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
       />
+
+      {editingText && textEditorStyle && (
+        <textarea
+          ref={textEditorRef}
+          className="sp-canvas-text-editor"
+          style={textEditorStyle}
+          value={editingText.text}
+          placeholder="Type here..."
+          onChange={(e) => {
+            const val = e.target.value;
+            onUpdateTexts(
+              (page?.texts || []).map((t) =>
+                t.id === editingText.id ? { ...t, text: val } : t
+              )
+            );
+          }}
+          onBlur={() => {
+            if (!editingText.text.trim()) {
+              onDeleteEmptyText(editingText.id);
+            } else {
+              onCommitTexts();
+            }
+            onSetEditingTextId(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' || ((e.metaKey || e.ctrlKey) && e.key === 'Enter')) {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      )}
+
+      {editingCell && cellEditorStyle && (
+        <input
+          ref={cellEditorRef}
+          type="text"
+          className="sp-canvas-cell-editor"
+          style={cellEditorStyle}
+          value={cellEditorValue}
+          onChange={(e) => {
+            const val = e.target.value;
+            onUpdateTables(
+              (page?.tables || []).map((tbl) => {
+                if (tbl.id !== editingCell.tableId) return tbl;
+                const nextRows = tbl.rows.map((r, rIdx) =>
+                  rIdx === editingCell.row
+                    ? r.map((c, cIdx) => (cIdx === editingCell.col ? val : c))
+                    : r
+                );
+                return { ...tbl, rows: nextRows };
+              })
+            );
+          }}
+          onBlur={() => {
+            onCommitTables();
+            onSetEditingCell(null);
+          }}
+          onKeyDown={(e) => {
+            const tbl = (page?.tables || []).find((t) => t.id === editingCell.tableId);
+            if (!tbl) return;
+            const numRows = tbl.rows.length;
+            const numCols = tbl.colWidths.length;
+
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            } else if (e.key === 'Tab') {
+              e.preventDefault();
+              let nextCol = editingCell.col + (e.shiftKey ? -1 : 1);
+              let nextRow = editingCell.row;
+              if (nextCol >= numCols) {
+                nextCol = 0;
+                nextRow += 1;
+              } else if (nextCol < 0) {
+                nextCol = numCols - 1;
+                nextRow -= 1;
+              }
+              if (nextRow >= 0 && nextRow < numRows) {
+                onCommitTables();
+                onSetEditingCell({ tableId: tbl.id, row: nextRow, col: nextCol });
+              } else {
+                e.currentTarget.blur();
+              }
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              const nextRow = editingCell.row + 1;
+              if (nextRow < numRows) {
+                onCommitTables();
+                onSetEditingCell({ tableId: tbl.id, row: nextRow, col: editingCell.col });
+              } else {
+                e.currentTarget.blur();
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

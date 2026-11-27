@@ -4,8 +4,11 @@ import {
   PenTool,
   Pencil,
   Highlighter,
-  Eraser,
   Shapes,
+  Type,
+  Table2,
+  Database,
+  Eraser,
   MousePointer2,
   Hand,
   Image as ImageIcon,
@@ -14,7 +17,17 @@ import {
   Trash2,
   Sparkles,
   Plus,
+  Minus,
   GripVertical,
+  Bold,
+  Italic,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  ArrowRightLeft,
+  SlidersHorizontal,
+  Copy,
+  X,
 } from 'lucide-react';
 
 // Excalidraw & tldraw inspired crisp, high-contrast palettes
@@ -66,6 +79,9 @@ const TOOLS = [
   { id: 'pencil', label: 'Pencil (C)', icon: Pencil },
   { id: 'highlighter', label: 'Highlighter (H)', icon: Highlighter },
   { id: 'shape', label: 'Shapes (S)', icon: Shapes },
+  { id: 'text', label: 'Text (T)', icon: Type },
+  { id: 'table', label: 'Table (G)', icon: Table2 },
+  { id: 'schema', label: 'Schema / ER Table (D)', icon: Database },
   { id: 'eraser', label: 'Eraser (E)', icon: Eraser },
   { id: 'select', label: 'Select & Move (V)', icon: MousePointer2 },
   { id: 'pan', label: 'Pan Infinite Canvas (Space)', icon: Hand },
@@ -191,6 +207,32 @@ const STROKE_STYLES = [
   { id: 'dotted', label: 'Dotted' },
 ];
 
+const FONT_OPTIONS = [
+  { id: 'sans', label: 'Sans' },
+  { id: 'serif', label: 'Serif' },
+  { id: 'mono', label: 'Mono' },
+  { id: 'hand', label: 'Hand' },
+];
+
+const TEXT_SIZES = [14, 18, 24, 32];
+
+const TABLE_PRESETS = [
+  { label: '2×2', rows: 2, cols: 2 },
+  { label: '3×3', rows: 3, cols: 3 },
+  { label: '4×3', rows: 4, cols: 3 },
+  { label: '4×4', rows: 4, cols: 4 },
+  { label: '5×4', rows: 5, cols: 4 },
+];
+
+const SCHEMA_TEMPLATES = [
+  { id: 'blank', label: 'Blank Entity' },
+  { id: 'users', label: 'Users' },
+  { id: 'orders', label: 'Orders' },
+  { id: 'posts', label: 'Posts' },
+];
+
+const CARDINALITIES = ['1:1', '1:N', 'N:1', 'N:M'];
+
 export default function FloatingToolbar({
   currentTool,
   onSelectTool,
@@ -206,14 +248,37 @@ export default function FloatingToolbar({
   onChangeStrokeStyle,
   shapeFill,
   onToggleShapeFill,
+  textStyle,
+  onChangeTextStyle,
+  tablePreset,
+  onChangeTablePreset,
+  schemaTemplate,
+  onChangeSchemaTemplate,
+  onCopyAllSql,
   darkMode,
   onUploadImage,
   onClearPage,
   selectedImage,
+  selectedText,
+  selectedTable,
+  selectedSchema,
+  selectedRelation,
   selectedStrokeIndex,
   onToggleImageLock,
   onDeleteSelectedImage,
   onDeleteSelectedStroke,
+  onUpdateSelectedText,
+  onToggleTextLock,
+  onDeleteSelectedText,
+  onTableAction,
+  onOpenSchemaEditor,
+  onStartConnectSchema,
+  onToggleSchemaLock,
+  onDeleteSelectedSchema,
+  onUpdateRelation,
+  onDeleteSelectedRelation,
+  connectingFromId,
+  onCancelConnect,
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -221,7 +286,8 @@ export default function FloatingToolbar({
   const anchorRef = useRef(null);
 
   const isInkTool = ['pen', 'pencil', 'highlighter', 'shape'].includes(currentTool);
-  const hasProperties = isInkTool || currentTool === 'eraser';
+  const isStructuredTool = ['text', 'table', 'schema'].includes(currentTool);
+  const hasProperties = isInkTool || isStructuredTool || currentTool === 'eraser';
   const swatches =
     currentTool === 'highlighter'
       ? HIGHLIGHTER_SWATCHES
@@ -273,18 +339,27 @@ export default function FloatingToolbar({
   const handleToolClick = (toolId) => {
     if (
       toolId === currentTool &&
-      ['pen', 'pencil', 'highlighter', 'shape', 'eraser'].includes(toolId)
+      ['pen', 'pencil', 'highlighter', 'shape', 'text', 'table', 'schema', 'eraser'].includes(toolId)
     ) {
       setPopoverOpen((prev) => !prev);
     } else {
       onSelectTool(toolId);
-      if (toolId === 'shape') {
+      if (['shape', 'table', 'schema'].includes(toolId)) {
         setPopoverOpen(true);
       } else {
         setPopoverOpen(false);
       }
     }
   };
+
+  const triggerBadgeText =
+    currentTool === 'text'
+      ? `${textStyle?.fontSize || 18}px`
+      : currentTool === 'table'
+      ? `${tablePreset?.rows || 3}×${tablePreset?.cols || 3}`
+      : currentTool === 'schema'
+      ? 'ER'
+      : `${currentWidth}px`;
 
   return (
     <div
@@ -350,20 +425,20 @@ export default function FloatingToolbar({
               type="button"
               className="sp-color-trigger"
               onClick={() => setPopoverOpen((prev) => !prev)}
-              title="Stroke color & thickness"
-              aria-label="Stroke color and thickness"
+              title="Tool properties & style"
+              aria-label="Tool properties and style"
               aria-expanded={popoverOpen}
             >
-              {isInkTool && (
+              {(isInkTool || isStructuredTool) && (
                 <span className="sp-color-dot" style={{ backgroundColor: currentColor }} />
               )}
-              <span className="sp-width-label">{currentWidth}px</span>
+              <span className="sp-width-label">{triggerBadgeText}</span>
             </button>
           </>
         )}
       </div>
 
-      {/* Contextual Popover (Excalidraw / tldraw inspired compact style panel) */}
+      {/* Contextual Tool Properties Popover */}
       <AnimatePresence>
         {popoverOpen && hasProperties && (
           <motion.div
@@ -397,10 +472,187 @@ export default function FloatingToolbar({
               </div>
             )}
 
-            {isInkTool && (
+            {currentTool === 'text' && (
+              <>
+                <div className="sp-popover-row">
+                  <div className="sp-popover-head">
+                    <span>Font Family</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Click canvas to type</span>
+                  </div>
+                  <div className="sp-segmented">
+                    {FONT_OPTIONS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        className={`sp-seg-btn ${textStyle.fontFamily === f.id ? 'active' : ''}`}
+                        onClick={() => onChangeTextStyle({ ...textStyle, fontFamily: f.id })}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="sp-popover-row">
+                  <div className="sp-popover-head">
+                    <span>Size &amp; Formatting</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>{textStyle.fontSize}px</span>
+                  </div>
+                  <div className="sp-size-presets">
+                    {TEXT_SIZES.map((sz) => (
+                      <button
+                        key={sz}
+                        type="button"
+                        className={`sp-size-dot-btn ${textStyle.fontSize === sz ? 'active' : ''}`}
+                        onClick={() => onChangeTextStyle({ ...textStyle, fontSize: sz })}
+                      >
+                        <span style={{ fontSize: 11.5 }}>{sz}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="sp-style-row">
+                    <div className="sp-segmented">
+                      <button
+                        type="button"
+                        className={`sp-seg-btn ${textStyle.fontWeight === 'bold' ? 'active' : ''}`}
+                        onClick={() =>
+                          onChangeTextStyle({
+                            ...textStyle,
+                            fontWeight: textStyle.fontWeight === 'bold' ? 'normal' : 'bold',
+                          })
+                        }
+                        title="Bold"
+                      >
+                        <Bold size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`sp-seg-btn ${textStyle.fontStyle === 'italic' ? 'active' : ''}`}
+                        onClick={() =>
+                          onChangeTextStyle({
+                            ...textStyle,
+                            fontStyle: textStyle.fontStyle === 'italic' ? 'normal' : 'italic',
+                          })
+                        }
+                        title="Italic"
+                      >
+                        <Italic size={13} />
+                      </button>
+                    </div>
+                    <div className="sp-segmented">
+                      {[
+                        { id: 'left', icon: AlignLeft },
+                        { id: 'center', icon: AlignCenter },
+                        { id: 'right', icon: AlignRight },
+                      ].map((a) => {
+                        const AIcon = a.icon;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className={`sp-seg-btn ${textStyle.textAlign === a.id ? 'active' : ''}`}
+                            onClick={() => onChangeTextStyle({ ...textStyle, textAlign: a.id })}
+                            title={`Align ${a.id}`}
+                          >
+                            <AIcon size={13} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {currentTool === 'table' && (
               <div className="sp-popover-row">
                 <div className="sp-popover-head">
-                  <span>Color</span>
+                  <span>Table Dimensions</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Click canvas to place</span>
+                </div>
+                <div className="sp-segmented">
+                  {TABLE_PRESETS.map((tp) => {
+                    const isAct =
+                      tablePreset.rows === tp.rows && tablePreset.cols === tp.cols;
+                    return (
+                      <button
+                        key={tp.label}
+                        type="button"
+                        className={`sp-seg-btn ${isAct ? 'active' : ''}`}
+                        onClick={() =>
+                          onChangeTablePreset({
+                            ...tablePreset,
+                            rows: tp.rows,
+                            cols: tp.cols,
+                          })
+                        }
+                      >
+                        {tp.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="sp-style-row" style={{ justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Header row</span>
+                  <button
+                    type="button"
+                    className={`sp-seg-btn fill-btn ${tablePreset.headerRow ? 'active' : ''}`}
+                    style={{ height: 28 }}
+                    onClick={() =>
+                      onChangeTablePreset({
+                        ...tablePreset,
+                        headerRow: !tablePreset.headerRow,
+                      })
+                    }
+                  >
+                    {tablePreset.headerRow ? 'On' : 'Off'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {currentTool === 'schema' && (
+              <div className="sp-popover-row">
+                <div className="sp-popover-head">
+                  <span>Schema Entity Template</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Click canvas to place</span>
+                </div>
+                <div className="sp-schema-template-grid">
+                  {SCHEMA_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      className={`sp-seg-btn ${schemaTemplate === tpl.id ? 'active' : ''}`}
+                      style={{
+                        height: 30,
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
+                      onClick={() => onChangeSchemaTemplate(tpl.id)}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="sp-btn"
+                  style={{ height: 28, fontSize: 12, marginTop: 2 }}
+                  onClick={() => {
+                    onCopyAllSql?.();
+                    setPopoverOpen(false);
+                  }}
+                >
+                  <Copy size={13} />
+                  Copy Page SQL DDL
+                </button>
+              </div>
+            )}
+
+            {(isInkTool || isStructuredTool) && (
+              <div className="sp-popover-row">
+                <div className="sp-popover-head">
+                  <span>{isStructuredTool ? 'Accent / Text Color' : 'Color'}</span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{currentColor}</span>
                 </div>
                 <div className="sp-swatches-grid">
@@ -427,43 +679,45 @@ export default function FloatingToolbar({
               </div>
             )}
 
-            <div className="sp-popover-row">
-              <div className="sp-popover-head">
-                <span>{currentTool === 'eraser' ? 'Eraser Size' : 'Stroke Width'}</span>
-                <span style={{ fontFamily: 'var(--font-mono)' }}>{currentWidth}px</span>
+            {(isInkTool || currentTool === 'eraser') && (
+              <div className="sp-popover-row">
+                <div className="sp-popover-head">
+                  <span>{currentTool === 'eraser' ? 'Eraser Size' : 'Stroke Width'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{currentWidth}px</span>
+                </div>
+                <div className="sp-size-presets">
+                  {presets.map((size, idx) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={`sp-size-dot-btn ${currentWidth === size ? 'active' : ''}`}
+                      onClick={() => onChangeWidth(size)}
+                      title={`${size}px`}
+                      aria-label={`Set width to ${size}px`}
+                    >
+                      <span
+                        style={{
+                          width: 22,
+                          height: Math.min(9, 1.5 + idx * 2.1),
+                          borderRadius: '9999px',
+                          backgroundColor: isInkTool ? currentColor : 'var(--text-primary)',
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="range"
+                  className="sp-range"
+                  min={currentTool === 'eraser' ? 6 : currentTool === 'highlighter' ? 8 : 1}
+                  max={currentTool === 'eraser' ? 64 : currentTool === 'highlighter' ? 40 : 24}
+                  step={currentTool === 'eraser' || currentTool === 'highlighter' ? 1 : 0.5}
+                  value={currentWidth}
+                  onChange={(e) => onChangeWidth(parseFloat(e.target.value))}
+                  aria-label="Adjust stroke width"
+                />
               </div>
-              <div className="sp-size-presets">
-                {presets.map((size, idx) => (
-                  <button
-                    key={size}
-                    type="button"
-                    className={`sp-size-dot-btn ${currentWidth === size ? 'active' : ''}`}
-                    onClick={() => onChangeWidth(size)}
-                    title={`${size}px`}
-                    aria-label={`Set width to ${size}px`}
-                  >
-                    <span
-                      style={{
-                        width: 22,
-                        height: Math.min(9, 1.5 + idx * 2.1),
-                        borderRadius: '9999px',
-                        backgroundColor: isInkTool ? currentColor : 'var(--text-primary)',
-                      }}
-                    />
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                className="sp-range"
-                min={currentTool === 'eraser' ? 6 : currentTool === 'highlighter' ? 8 : 1}
-                max={currentTool === 'eraser' ? 64 : currentTool === 'highlighter' ? 40 : 24}
-                step={currentTool === 'eraser' || currentTool === 'highlighter' ? 1 : 0.5}
-                value={currentWidth}
-                onChange={(e) => onChangeWidth(parseFloat(e.target.value))}
-                aria-label="Adjust stroke width"
-              />
-            </div>
+            )}
 
             {currentTool === 'shape' && (
               <div className="sp-popover-row">
@@ -590,9 +844,33 @@ export default function FloatingToolbar({
         )}
       </AnimatePresence>
 
-      {/* Contextual Bar when an Image or Stroke is Selected */}
+      {/* Connecting Mode Banner */}
       <AnimatePresence>
-        {currentTool === 'select' && selectedImage && (
+        {connectingFromId && (
+          <motion.div
+            className="sp-selection-pill"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <span style={{ color: 'var(--accent)', fontWeight: 500 }}>
+              Click target schema table to connect
+            </span>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={onCancelConnect}
+              title="Cancel connection (Esc)"
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Contextual Selection Pills */}
+      <AnimatePresence>
+        {!connectingFromId && currentTool === 'select' && selectedImage && (
           <motion.div
             className="sp-selection-pill"
             initial={{ opacity: 0, y: -4 }}
@@ -621,24 +899,267 @@ export default function FloatingToolbar({
           </motion.div>
         )}
 
-        {currentTool === 'select' && !selectedImage && selectedStrokeIndex !== null && (
+        {!connectingFromId && currentTool === 'select' && selectedText && (
           <motion.div
             className="sp-selection-pill"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
           >
-            <span>Stroke selected · Drag to move</span>
+            <span>Text</span>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() =>
+                onUpdateSelectedText({
+                  ...selectedText,
+                  fontWeight: selectedText.fontWeight === 'bold' ? 'normal' : 'bold',
+                })
+              }
+              style={selectedText.fontWeight === 'bold' ? { color: 'var(--accent)' } : undefined}
+              title="Bold"
+            >
+              <Bold size={13} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() =>
+                onUpdateSelectedText({
+                  ...selectedText,
+                  fontStyle: selectedText.fontStyle === 'italic' ? 'normal' : 'italic',
+                })
+              }
+              style={selectedText.fontStyle === 'italic' ? { color: 'var(--accent)' } : undefined}
+              title="Italic"
+            >
+              <Italic size={13} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() =>
+                onUpdateSelectedText({
+                  ...selectedText,
+                  fontSize: Math.max(11, (selectedText.fontSize || 18) - 2),
+                })
+              }
+              title="Decrease font size"
+            >
+              <Minus size={13} />
+            </button>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+              {selectedText.fontSize || 18}px
+            </span>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() =>
+                onUpdateSelectedText({
+                  ...selectedText,
+                  fontSize: Math.min(64, (selectedText.fontSize || 18) + 2),
+                })
+              }
+              title="Increase font size"
+            >
+              <Plus size={13} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={onToggleTextLock}
+              title={selectedText.locked ? 'Unlock Text' : 'Lock Text'}
+              style={selectedText.locked ? { color: 'var(--warning)' } : undefined}
+            >
+              {selectedText.locked ? <Lock size={14} /> : <Unlock size={14} />}
+            </button>
             <button
               type="button"
               className="sp-mini-btn danger"
-              onClick={onDeleteSelectedStroke}
-              title="Delete Stroke (Del)"
+              onClick={onDeleteSelectedText}
+              disabled={selectedText.locked}
+              title="Delete Text (Del)"
             >
               <Trash2 size={14} />
             </button>
           </motion.div>
         )}
+
+        {!connectingFromId && currentTool === 'select' && selectedTable && (
+          <motion.div
+            className="sp-selection-pill"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <span>Table · Double-click cell to edit</span>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('addRow')}
+              title="Add Row"
+            >
+              +R
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('removeRow')}
+              title="Remove Last Row"
+            >
+              -R
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('addCol')}
+              title="Add Column"
+            >
+              +C
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('removeCol')}
+              title="Remove Last Column"
+            >
+              -C
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('toggleHeader')}
+              title="Toggle Header Row"
+              style={selectedTable.headerRow ? { color: 'var(--accent)' } : undefined}
+            >
+              H
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onTableAction('toggleLock')}
+              title={selectedTable.locked ? 'Unlock Table' : 'Lock Table'}
+              style={selectedTable.locked ? { color: 'var(--warning)' } : undefined}
+            >
+              {selectedTable.locked ? <Lock size={14} /> : <Unlock size={14} />}
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn danger"
+              onClick={() => onTableAction('delete')}
+              disabled={selectedTable.locked}
+              title="Delete Table (Del)"
+            >
+              <Trash2 size={14} />
+            </button>
+          </motion.div>
+        )}
+
+        {!connectingFromId && currentTool === 'select' && selectedSchema && (
+          <motion.div
+            className="sp-selection-pill"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <span>{selectedSchema.name || 'Schema'}</span>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={onOpenSchemaEditor}
+              title="Edit Columns & Types"
+            >
+              <SlidersHorizontal size={14} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={() => onStartConnectSchema(selectedSchema.id)}
+              title="Connect to another table"
+            >
+              <ArrowRightLeft size={14} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={onToggleSchemaLock}
+              title={selectedSchema.locked ? 'Unlock Schema' : 'Lock Schema'}
+              style={selectedSchema.locked ? { color: 'var(--warning)' } : undefined}
+            >
+              {selectedSchema.locked ? <Lock size={14} /> : <Unlock size={14} />}
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn danger"
+              onClick={onDeleteSelectedSchema}
+              disabled={selectedSchema.locked}
+              title="Delete Schema Table (Del)"
+            >
+              <Trash2 size={14} />
+            </button>
+          </motion.div>
+        )}
+
+        {!connectingFromId && currentTool === 'select' && selectedRelation && (
+          <motion.div
+            className="sp-selection-pill"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <span>Relation</span>
+            {CARDINALITIES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className="sp-mini-btn"
+                style={
+                  selectedRelation.cardinality === c
+                    ? { color: 'var(--accent)', fontWeight: 700, fontSize: 11 }
+                    : { fontSize: 11 }
+                }
+                onClick={() => onUpdateRelation({ ...selectedRelation, cardinality: c })}
+                title={`Set cardinality to ${c}`}
+              >
+                {c}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="sp-mini-btn danger"
+              onClick={onDeleteSelectedRelation}
+              title="Delete Relation (Del)"
+            >
+              <Trash2 size={14} />
+            </button>
+          </motion.div>
+        )}
+
+        {!connectingFromId &&
+          currentTool === 'select' &&
+          !selectedImage &&
+          !selectedText &&
+          !selectedTable &&
+          !selectedSchema &&
+          !selectedRelation &&
+          selectedStrokeIndex !== null && (
+            <motion.div
+              className="sp-selection-pill"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+            >
+              <span>Stroke selected · Drag to move</span>
+              <button
+                type="button"
+                className="sp-mini-btn danger"
+                onClick={onDeleteSelectedStroke}
+                title="Delete Stroke (Del)"
+              >
+                <Trash2 size={14} />
+              </button>
+            </motion.div>
+          )}
       </AnimatePresence>
     </div>
   );

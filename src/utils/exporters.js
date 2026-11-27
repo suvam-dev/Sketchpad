@@ -2,6 +2,7 @@
  * Offline Export & Import utilities: PNG, Vector SVG, Multi-page PDF, and JSON Backup.
  */
 import { renderPageToContext, PAPER_COLORS, resolveStrokeColor } from './drawingEngine';
+import { structuredElementsToSvg } from './structuredElements';
 
 function sanitizeFilename(name, fallback = 'scratchpad-note') {
   const clean = (name || fallback)
@@ -87,6 +88,9 @@ export function exportPageToSvg({
       `<image href="${img.src}" x="${img.x}" y="${img.y}" width="${img.width}" height="${img.height}" preserveAspectRatio="none" />`
     );
   });
+
+  // Structured elements (relations, tables, schemas, texts)
+  svgParts.push(...structuredElementsToSvg(page, darkMode, resolveStrokeColor));
 
   // Vector strokes
   strokes.forEach((stroke) => {
