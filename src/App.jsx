@@ -108,6 +108,7 @@ export default function App() {
   const [selectedStrokeIndex, setSelectedStrokeIndex] = useState(null);
   const [selectMode, setSelectMode] = useState('box'); // 'box' | 'lasso'
   const [selectedGroup, setSelectedGroup] = useState(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
 
   // Active inline editors & schema connector mode
   const [editingTextId, setEditingTextId] = useState(null);
@@ -124,6 +125,8 @@ export default function App() {
   const canvasSizeRef = useRef({ width: 1024, height: 768 });
   const saveTimerRef = useRef(null);
   const toastTimerRef = useRef(null);
+  const clipboardRef = useRef(null);
+  const pasteCountRef = useRef(0);
 
   const currentWidth = toolWidths[currentTool] ?? 2.5;
 
@@ -884,6 +887,181 @@ export default function App() {
     showToast(`Duplicated ${nextGroup.count} item${nextGroup.count === 1 ? '' : 's'}`);
   }, [selectedGroup, activePage, pushUndoSnapshot, mutateActivePage, showToast]);
 
+  const handleChangeTableColor = useCallback(
+    (color) => {
+      if (!selectedTable || !activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        tables: (p.tables || []).map((t) =>
+          t.id === selectedTable.id ? { ...t, color } : t
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
+    [selectedTable, activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleDuplicateSelectedTable = useCallback(
+    (target = selectedTable) => {
+      if (!target || !activePage) return;
+      const copy = {
+        ...target,
+        id: createId(),
+        x: target.x + 28,
+        y: target.y + 28,
+        locked: false,
+        colWidths: [...(target.colWidths || [130, 130])],
+        rows: JSON.parse(JSON.stringify(target.rows || [])),
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        tables: [...(p.tables || []), copy],
+        updatedAt: Date.now(),
+      }));
+      handleSelectStructuredElement('table', copy.id);
+      showToast('Duplicated table');
+    },
+    [selectedTable, activePage, pushUndoSnapshot, mutateActivePage, handleSelectStructuredElement, showToast]
+  );
+
+  const handleChangeSchemaColor = useCallback(
+    (color) => {
+      if (!selectedSchema || !activePage) return;
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        schemas: (p.schemas || []).map((s) =>
+          s.id === selectedSchema.id ? { ...s, color } : s
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
+    [selectedSchema, activePage, pushUndoSnapshot, mutateActivePage]
+  );
+
+  const handleDuplicateSelectedSchema = useCallback(
+    (target = selectedSchema) => {
+      if (!target || !activePage) return;
+      const copy = {
+        ...target,
+        id: createId(),
+        name: `${target.name || 'table'}_copy`,
+        x: target.x + 28,
+        y: target.y + 28,
+        locked: false,
+        fields: (target.fields || []).map((f) => ({ ...f, id: createId() })),
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        schemas: [...(p.schemas || []), copy],
+        updatedAt: Date.now(),
+      }));
+      handleSelectStructuredElement('schema', copy.id);
+      if (schemaEditorId) setSchemaEditorId(copy.id);
+      showToast(`Duplicated "${target.name || 'table'}"`);
+    },
+    [selectedSchema, activePage, pushUndoSnapshot, mutateActivePage, handleSelectStructuredElement, schemaEditorId, showToast]
+  );
+
+  const handleCopySelected = useCallback(() => {
+    if (selectedSchema) {
+      clipboardRef.current = { type: 'schema', data: JSON.parse(JSON.stringify(selectedSchema)) };
+      pasteCountRef.current = 0;
+      setHasClipboard(true);
+      showToast(`Copied "${selectedSchema.name || 'Schema'}" · Press ⌘V to paste`);
+      return;
+    }
+    if (selectedTable) {
+      clipboardRef.current = { type: 'table', data: JSON.parse(JSON.stringify(selectedTable)) };
+      pasteCountRef.current = 0;
+      setHasClipboard(true);
+      showToast('Copied table · Press ⌘V to paste');
+      return;
+    }
+    if (selectedText) {
+      clipboardRef.current = { type: 'text', data: JSON.parse(JSON.stringify(selectedText)) };
+      pasteCountRef.current = 0;
+      setHasClipboard(true);
+      showToast('Copied text · Press ⌘V to paste');
+    }
+  }, [selectedSchema, selectedTable, selectedText, showToast]);
+
+  const handlePasteClipboard = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip || !activePage) return;
+    pasteCountRef.current += 1;
+    const offset = 28 * pasteCountRef.current;
+
+    if (clip.type === 'schema') {
+      const src = clip.data;
+      const pasted = {
+        ...src,
+        id: createId(),
+        name: `${src.name || 'table'}_copy`,
+        x: src.x + offset,
+        y: src.y + offset,
+        locked: false,
+        fields: (src.fields || []).map((f) => ({ ...f, id: createId() })),
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        schemas: [...(p.schemas || []), pasted],
+        updatedAt: Date.now(),
+      }));
+      setCurrentTool('select');
+      handleSelectStructuredElement('schema', pasted.id);
+      showToast(`Pasted "${pasted.name}"`);
+      return;
+    }
+
+    if (clip.type === 'table') {
+      const src = clip.data;
+      const pasted = {
+        ...src,
+        id: createId(),
+        x: src.x + offset,
+        y: src.y + offset,
+        locked: false,
+        colWidths: [...(src.colWidths || [130, 130])],
+        rows: JSON.parse(JSON.stringify(src.rows || [])),
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        tables: [...(p.tables || []), pasted],
+        updatedAt: Date.now(),
+      }));
+      setCurrentTool('select');
+      handleSelectStructuredElement('table', pasted.id);
+      showToast('Pasted table');
+      return;
+    }
+
+    if (clip.type === 'text') {
+      const src = clip.data;
+      const pasted = {
+        ...src,
+        id: createId(),
+        x: src.x + offset,
+        y: src.y + offset,
+        locked: false,
+      };
+      pushUndoSnapshot(activePage);
+      mutateActivePage((p) => ({
+        ...p,
+        texts: [...(p.texts || []), pasted],
+        updatedAt: Date.now(),
+      }));
+      setCurrentTool('select');
+      handleSelectStructuredElement('text', pasted.id);
+      showToast('Pasted text');
+    }
+  }, [activePage, pushUndoSnapshot, mutateActivePage, handleSelectStructuredElement, showToast]);
+
   const handlePanZoomChange = useCallback((nextPanX, nextPanY, nextZoom) => {
     setPanX(nextPanX);
     setPanY(nextPanY);
@@ -1362,10 +1540,32 @@ export default function App() {
         handleRedo();
         return;
       }
-      if (meta && key === 'd' && selectedGroup) {
+      if (meta && key === 'c' && (selectedSchema || selectedTable || selectedText)) {
         e.preventDefault();
-        handleDuplicateSelectedGroup();
+        handleCopySelected();
         return;
+      }
+      if (meta && key === 'v' && clipboardRef.current) {
+        e.preventDefault();
+        handlePasteClipboard();
+        return;
+      }
+      if (meta && key === 'd') {
+        if (selectedGroup) {
+          e.preventDefault();
+          handleDuplicateSelectedGroup();
+          return;
+        }
+        if (selectedSchema) {
+          e.preventDefault();
+          handleDuplicateSelectedSchema();
+          return;
+        }
+        if (selectedTable) {
+          e.preventDefault();
+          handleDuplicateSelectedTable();
+          return;
+        }
       }
       if (meta && e.key === '\\') {
         e.preventDefault();
@@ -1457,7 +1657,11 @@ export default function App() {
   }, [
     handleUndo,
     handleRedo,
+    handleCopySelected,
+    handlePasteClipboard,
     handleDuplicateSelectedGroup,
+    handleDuplicateSelectedSchema,
+    handleDuplicateSelectedTable,
     handleDeleteSelectedGroup,
     handleDeleteSelectedImage,
     handleDeleteSelectedText,
@@ -1647,6 +1851,8 @@ export default function App() {
                 onDuplicateSelectedGroup={handleDuplicateSelectedGroup}
                 onDeleteSelectedGroup={handleDeleteSelectedGroup}
                 onClearSelectedGroup={() => setSelectedGroup(null)}
+                hasClipboard={hasClipboard}
+                onPasteClipboard={handlePasteClipboard}
                 onToggleImageLock={handleToggleImageLock}
                 onDeleteSelectedImage={handleDeleteSelectedImage}
                 onDeleteSelectedStroke={handleDeleteSelectedStroke}
@@ -1654,8 +1860,12 @@ export default function App() {
                 onToggleTextLock={handleToggleTextLock}
                 onDeleteSelectedText={handleDeleteSelectedText}
                 onTableAction={handleTableAction}
+                onChangeTableColor={handleChangeTableColor}
+                onDuplicateSelectedTable={() => handleDuplicateSelectedTable()}
                 onOpenSchemaEditor={() => selectedSchema && setSchemaEditorId(selectedSchema.id)}
                 onStartConnectSchema={handleStartConnectSchema}
+                onChangeSchemaColor={handleChangeSchemaColor}
+                onDuplicateSelectedSchema={() => handleDuplicateSelectedSchema()}
                 onToggleSchemaLock={handleToggleSchemaLock}
                 onDeleteSelectedSchema={handleDeleteSelectedSchema}
                 onUpdateRelation={handleUpdateRelation}
@@ -1676,6 +1886,7 @@ export default function App() {
                     handleStartConnectSchema(id);
                   }}
                   onCopySql={() => showToast(`Copied SQL for "${editingSchema.name}"`)}
+                  onDuplicate={() => handleDuplicateSelectedSchema(editingSchema)}
                 />
               )}
 

@@ -1,7 +1,19 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Trash2, Copy, ArrowRightLeft, Database } from 'lucide-react';
+import { X, Plus, Trash2, Copy, Files, ArrowRightLeft, Database } from 'lucide-react';
 import { DATA_TYPE_PRESETS, generateSchemaSql } from '../utils/structuredElements';
 import { createId } from '../utils/storage';
+
+const SCHEMA_COLORS = [
+  '#3b82f6',
+  '#38bdf8',
+  '#20c997',
+  '#51cf66',
+  '#ffd43b',
+  '#ffa94d',
+  '#ff6b6b',
+  '#f06595',
+  '#94a3b8',
+];
 
 export default function SchemaEditorPanel({
   schema,
@@ -11,6 +23,7 @@ export default function SchemaEditorPanel({
   onClose,
   onStartConnect,
   onCopySql,
+  onDuplicate,
 }) {
   if (!schema) return null;
 
@@ -74,6 +87,17 @@ export default function SchemaEditorPanel({
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {onDuplicate && (
+              <button
+                type="button"
+                className="sp-mini-btn"
+                onClick={onDuplicate}
+                title="Duplicate DB Table (⌘D)"
+                aria-label="Duplicate DB Table"
+              >
+                <Files size={13} />
+              </button>
+            )}
             <button
               type="button"
               className="sp-mini-btn"
@@ -93,6 +117,37 @@ export default function SchemaEditorPanel({
               <X size={14} />
             </button>
           </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 14px',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 2 }}>Color</span>
+          {SCHEMA_COLORS.map((hex) => (
+            <button
+              key={hex}
+              type="button"
+              className={`sp-swatch ${(schema.color || '').toLowerCase() === hex.toLowerCase() ? 'active' : ''}`}
+              style={{ width: 18, height: 18, backgroundColor: hex }}
+              onClick={() => onChange({ ...schema, color: hex })}
+              aria-label={`Set table color ${hex}`}
+            />
+          ))}
+          <label className="sp-custom-color" style={{ width: 18, height: 18 }} title="Custom table color">
+            <Plus size={10} />
+            <input
+              type="color"
+              value={schema.color || '#3b82f6'}
+              onChange={(e) => onChange({ ...schema, color: e.target.value })}
+              aria-label="Custom table color"
+            />
+          </label>
         </div>
 
         <div className="sp-schema-fields-list">

@@ -270,6 +270,8 @@ export default function FloatingToolbar({
   onDuplicateSelectedGroup,
   onDeleteSelectedGroup,
   onClearSelectedGroup,
+  hasClipboard,
+  onPasteClipboard,
   onToggleImageLock,
   onDeleteSelectedImage,
   onDeleteSelectedStroke,
@@ -277,8 +279,12 @@ export default function FloatingToolbar({
   onToggleTextLock,
   onDeleteSelectedText,
   onTableAction,
+  onChangeTableColor,
+  onDuplicateSelectedTable,
   onOpenSchemaEditor,
   onStartConnectSchema,
+  onChangeSchemaColor,
+  onDuplicateSelectedSchema,
   onToggleSchemaLock,
   onDeleteSelectedSchema,
   onUpdateRelation,
@@ -1025,7 +1031,29 @@ export default function FloatingToolbar({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
           >
-            <span>Table · Double-click cell to edit</span>
+            <span>Table · Double-click cell</span>
+            <label
+              className="sp-mini-btn"
+              title="Change Table Color"
+              style={{ position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+            >
+              <span
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  backgroundColor: selectedTable.color || 'var(--accent)',
+                  border: '1px solid var(--border-strong)',
+                }}
+              />
+              <input
+                type="color"
+                value={selectedTable.color || '#3b82f6'}
+                onChange={(e) => onChangeTableColor?.(e.target.value)}
+                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+                aria-label="Change table color"
+              />
+            </label>
             <button
               type="button"
               className="sp-mini-btn"
@@ -1070,6 +1098,14 @@ export default function FloatingToolbar({
             <button
               type="button"
               className="sp-mini-btn"
+              onClick={onDuplicateSelectedTable}
+              title="Copy & Paste Table (⌘C / ⌘D)"
+            >
+              <Copy size={13} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
               onClick={() => onTableAction('toggleLock')}
               title={selectedTable.locked ? 'Unlock Table' : 'Lock Table'}
               style={selectedTable.locked ? { color: 'var(--warning)' } : undefined}
@@ -1096,6 +1132,28 @@ export default function FloatingToolbar({
             exit={{ opacity: 0, y: -4 }}
           >
             <span>{selectedSchema.name || 'Schema'}</span>
+            <label
+              className="sp-mini-btn"
+              title="Change DB Table Color"
+              style={{ position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+            >
+              <span
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  backgroundColor: selectedSchema.color || 'var(--accent)',
+                  border: '1px solid var(--border-strong)',
+                }}
+              />
+              <input
+                type="color"
+                value={selectedSchema.color || '#3b82f6'}
+                onChange={(e) => onChangeSchemaColor?.(e.target.value)}
+                style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
+                aria-label="Change DB table color"
+              />
+            </label>
             <button
               type="button"
               className="sp-mini-btn"
@@ -1111,6 +1169,14 @@ export default function FloatingToolbar({
               title="Connect to another table"
             >
               <ArrowRightLeft size={14} />
+            </button>
+            <button
+              type="button"
+              className="sp-mini-btn"
+              onClick={onDuplicateSelectedSchema}
+              title="Copy & Paste DB Table (⌘C / ⌘D)"
+            >
+              <Copy size={13} />
             </button>
             <button
               type="button"
@@ -1230,6 +1296,34 @@ export default function FloatingToolbar({
                 title="Delete Stroke (Del)"
               >
                 <Trash2 size={14} />
+              </button>
+            </motion.div>
+          )}
+
+        {!connectingFromId &&
+          currentTool === 'select' &&
+          hasClipboard &&
+          !selectedGroup &&
+          !selectedImage &&
+          !selectedText &&
+          !selectedTable &&
+          !selectedSchema &&
+          !selectedRelation &&
+          selectedStrokeIndex === null && (
+            <motion.div
+              className="sp-selection-pill"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+            >
+              <button
+                type="button"
+                className="sp-btn"
+                style={{ height: 24, fontSize: 11.5, padding: '0 8px', border: 'none', background: 'transparent' }}
+                onClick={onPasteClipboard}
+                title="Paste copied item (⌘V)"
+              >
+                Paste (⌘V)
               </button>
             </motion.div>
           )}
