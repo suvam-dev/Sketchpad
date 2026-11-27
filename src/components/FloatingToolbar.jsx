@@ -83,7 +83,7 @@ const TOOLS = [
   { id: 'table', label: 'Table (G)', icon: Table2 },
   { id: 'schema', label: 'Schema / ER Table (D)', icon: Database },
   { id: 'eraser', label: 'Eraser (E)', icon: Eraser },
-  { id: 'select', label: 'Select & Move (V)', icon: MousePointer2 },
+  { id: 'select', label: 'Select & Area Move (V)', icon: MousePointer2 },
   { id: 'pan', label: 'Pan Infinite Canvas (Space)', icon: Hand },
 ];
 
@@ -264,6 +264,12 @@ export default function FloatingToolbar({
   selectedSchema,
   selectedRelation,
   selectedStrokeIndex,
+  selectMode,
+  onChangeSelectMode,
+  selectedGroup,
+  onDuplicateSelectedGroup,
+  onDeleteSelectedGroup,
+  onClearSelectedGroup,
   onToggleImageLock,
   onDeleteSelectedImage,
   onDeleteSelectedStroke,
@@ -287,7 +293,7 @@ export default function FloatingToolbar({
 
   const isInkTool = ['pen', 'pencil', 'highlighter', 'shape'].includes(currentTool);
   const isStructuredTool = ['text', 'table', 'schema'].includes(currentTool);
-  const hasProperties = isInkTool || isStructuredTool || currentTool === 'eraser';
+  const hasProperties = isInkTool || isStructuredTool || currentTool === 'eraser' || currentTool === 'select';
   const swatches =
     currentTool === 'highlighter'
       ? HIGHLIGHTER_SWATCHES
@@ -339,7 +345,7 @@ export default function FloatingToolbar({
   const handleToolClick = (toolId) => {
     if (
       toolId === currentTool &&
-      ['pen', 'pencil', 'highlighter', 'shape', 'text', 'table', 'schema', 'eraser'].includes(toolId)
+      ['pen', 'pencil', 'highlighter', 'shape', 'text', 'table', 'schema', 'eraser', 'select'].includes(toolId)
     ) {
       setPopoverOpen((prev) => !prev);
     } else {
@@ -359,6 +365,8 @@ export default function FloatingToolbar({
       ? `${tablePreset?.rows || 3}×${tablePreset?.cols || 3}`
       : currentTool === 'schema'
       ? 'ER'
+      : currentTool === 'select'
+      ? (selectMode === 'lasso' ? 'Lasso' : 'Box')
       : `${currentWidth}px`;
 
   return (
@@ -448,6 +456,31 @@ export default function FloatingToolbar({
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.16 }}
           >
+            {currentTool === 'select' && (
+              <div className="sp-popover-row">
+                <div className="sp-popover-head">
+                  <span>Area Selection Mode</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Drag on canvas</span>
+                </div>
+                <div className="sp-segmented">
+                  <button
+                    type="button"
+                    className={`sp-seg-btn ${selectMode === 'box' ? 'active' : ''}`}
+                    onClick={() => onChangeSelectMode('box')}
+                  >
+                    Box Area
+                  </button>
+                  <button
+                    type="button"
+                    className={`sp-seg-btn ${selectMode === 'lasso' ? 'active' : ''}`}
+                    onClick={() => onChangeSelectMode('lasso')}
+                  >
+                    Lasso Area
+                  </button>
+                </div>
+              </div>
+            )}
+
             {currentTool === 'shape' && (
               <div className="sp-popover-row">
                 <div className="sp-popover-head">
@@ -1137,6 +1170,46 @@ export default function FloatingToolbar({
 
         {!connectingFromId &&
           currentTool === 'select' &&
+          selectedGroup && (
+            <motion.div
+              className="sp-selection-pill"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+            >
+              <span>
+                {selectedGroup.count} item{selectedGroup.count === 1 ? '' : 's'} selected · Drag to move
+              </span>
+              <button
+                type="button"
+                className="sp-mini-btn"
+                onClick={onDuplicateSelectedGroup}
+                title="Duplicate Selection (⌘D)"
+              >
+                <Copy size={13} />
+              </button>
+              <button
+                type="button"
+                className="sp-mini-btn danger"
+                onClick={onDeleteSelectedGroup}
+                title="Delete Selection (Del)"
+              >
+                <Trash2 size={14} />
+              </button>
+              <button
+                type="button"
+                className="sp-mini-btn"
+                onClick={onClearSelectedGroup}
+                title="Clear Selection (Esc)"
+              >
+                <X size={14} />
+              </button>
+            </motion.div>
+          )}
+
+        {!connectingFromId &&
+          currentTool === 'select' &&
+          !selectedGroup &&
           !selectedImage &&
           !selectedText &&
           !selectedTable &&

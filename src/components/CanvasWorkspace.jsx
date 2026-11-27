@@ -42,6 +42,78 @@ function getStrokeBoundingBox(stroke) {
   };
 }
 
+function pointInPolygon(x, y, poly) {
+  if (!poly || poly.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect =
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-9) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function rectsOverlap(a, b) {
+  return !(a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY);
+}
+
+function getGroupBoundingBox(page, group, ctx) {
+  if (!page || !group) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const expand = (x0, y0, x1, y1) => {
+    if (x0 < minX) minX = x0;
+    if (y0 < minY) minY = y0;
+    if (x1 > maxX) maxX = x1;
+    if (y1 > maxY) maxY = y1;
+  };
+
+  (group.strokeIndices || []).forEach((idx) => {
+    const b = getStrokeBoundingBox(page.strokes?.[idx]);
+    if (b) expand(b.minX, b.minY, b.maxX, b.maxY);
+  });
+
+  if (ctx) {
+    (group.textIds || []).forEach((id) => {
+      const txt = (page.texts || []).find((t) => t.id === id);
+      if (txt) {
+        const m = getTextMetrics(ctx, txt);
+        expand(txt.x, txt.y, txt.x + m.width, txt.y + m.height);
+      }
+    });
+    (group.tableIds || []).forEach((id) => {
+      const tbl = (page.tables || []).find((t) => t.id === id);
+      if (tbl) {
+        const m = getTableMetrics(ctx, tbl);
+        expand(tbl.x, tbl.y, tbl.x + m.totalWidth, tbl.y + m.totalHeight);
+      }
+    });
+  }
+
+  (group.schemaIds || []).forEach((id) => {
+    const sch = (page.schemas || []).find((s) => s.id === id);
+    if (sch) {
+      const m = getSchemaMetrics(sch);
+      expand(sch.x, sch.y, sch.x + m.width, sch.y + m.height);
+    }
+  });
+
+  (group.imageIds || []).forEach((id) => {
+    const img = (page.images || []).find((i) => i.id === id);
+    if (img) expand(img.x, img.y, img.x + img.width, img.y + img.height);
+  });
+
+  if (!Number.isFinite(minX)) return null;
+  return { minX: minX - 8, minY: minY - 8, maxX: maxX + 8, maxY: maxY + 8 };
+}
+
 function hitTestStroke(stroke, worldX, worldY, tolerance) {
   if (!stroke?.points || stroke.points.length === 0 || stroke.tool === 'eraser') return false;
   const hitDist = Math.max(tolerance, (stroke.width || 3) / 2 + 6);
@@ -162,12 +234,17 @@ export default function CanvasWorkspace({
   selectedElementId,
   selectedElementType,
   selectedStrokeIndex,
+  selectMode,
+  selectedGroup,
   editingTextId,
   editingCell,
   connectingFromId,
   onSelectElement,
   onSelectStructuredElement,
   onSelectStroke,
+  onSelectGroup,
+  onUpdateGroupItems,
+  onCommitGroupItems,
   onSetEditingTextId,
   onSetEditingCell,
   onOpenSchemaEditor,
@@ -204,6 +281,8 @@ export default function CanvasWorkspace({
   const isMovingStrokeRef = useRef(false);
   const isMovingStructuredRef = useRef(null); // { type: 'text'|'table'|'schema', id }
   const isResizingStructuredRef = useRef(null); // { type: 'text'|'table'|'schema', id, dir }
+  const isMovingGroupRef = useRef(false);
+  const marqueeRef = useRef(null);
   const activeStrokeRef = useRef(null);
   const shapeStartRef = useRef(null);
   const lastPointerRef = useRef({ x: 0, y: 0 });
@@ -236,6 +315,8 @@ export default function CanvasWorkspace({
     selectedElementId,
     selectedElementType,
     selectedStrokeIndex,
+    selectMode,
+    selectedGroup,
     editingTextId,
     editingCell,
     connectingFromId,
@@ -324,9 +405,75 @@ export default function CanvasWorkspace({
           ctx.restore();
         }
       }
+
+      if (s.selectedGroup) {
+        const gBounds = getGroupBoundingBox(s.page, s.selectedGroup, ctx);
+        if (gBounds) {
+          ctx.save();
+          ctx.setTransform(dims.dpr, 0, 0, dims.dpr, 0, 0);
+          ctx.scale(s.zoom, s.zoom);
+          ctx.translate(s.panX, s.panY);
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+          ctx.fillRect(
+            gBounds.minX,
+            gBounds.minY,
+            gBounds.maxX - gBounds.minX,
+            gBounds.maxY - gBounds.minY
+          );
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 1.5 / s.zoom;
+          ctx.setLineDash([6 / s.zoom, 4 / s.zoom]);
+          ctx.strokeRect(
+            gBounds.minX,
+            gBounds.minY,
+            gBounds.maxX - gBounds.minX,
+            gBounds.maxY - gBounds.minY
+          );
+          ctx.restore();
+        }
+      }
     },
     [syncCanvasDimensions, imageCache]
   );
+
+  const paintLiveMarquee = useCallback((marquee) => {
+    const liveCanvas = liveCanvasRef.current;
+    if (!liveCanvas || !marquee) return;
+    const dpr = window.devicePixelRatio || 1;
+    const s = stateRef.current;
+    const lCtx = liveCanvas.getContext('2d');
+
+    lCtx.setTransform(1, 0, 0, 1, 0, 0);
+    lCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+
+    lCtx.save();
+    lCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    lCtx.scale(s.zoom, s.zoom);
+    lCtx.translate(s.panX, s.panY);
+    lCtx.fillStyle = 'rgba(59, 130, 246, 0.12)';
+    lCtx.strokeStyle = '#3b82f6';
+    lCtx.lineWidth = 1.5 / s.zoom;
+
+    if (marquee.mode === 'lasso' && marquee.points.length > 1) {
+      lCtx.setLineDash([5 / s.zoom, 4 / s.zoom]);
+      lCtx.beginPath();
+      lCtx.moveTo(marquee.points[0].x, marquee.points[0].y);
+      for (let i = 1; i < marquee.points.length; i++) {
+        lCtx.lineTo(marquee.points[i].x, marquee.points[i].y);
+      }
+      lCtx.closePath();
+      lCtx.fill();
+      lCtx.stroke();
+    } else {
+      const x = Math.min(marquee.start.x, marquee.current.x);
+      const y = Math.min(marquee.start.y, marquee.current.y);
+      const w = Math.abs(marquee.current.x - marquee.start.x);
+      const h = Math.abs(marquee.current.y - marquee.start.y);
+      lCtx.fillRect(x, y, w, h);
+      lCtx.strokeRect(x, y, w, h);
+    }
+    lCtx.restore();
+  }, []);
 
   const paintLiveIncremental = useCallback((stroke) => {
     const liveCanvas = liveCanvasRef.current;
@@ -372,6 +519,7 @@ export default function CanvasWorkspace({
     selectedElementId,
     selectedElementType,
     selectedStrokeIndex,
+    selectedGroup,
     editingTextId,
     editingCell,
     connectingFromId,
@@ -394,6 +542,8 @@ export default function CanvasWorkspace({
       isMovingStrokeRef.current = false;
       isMovingStructuredRef.current = null;
       isResizingStructuredRef.current = null;
+      isMovingGroupRef.current = false;
+      marqueeRef.current = null;
       clearLiveCanvas();
     };
     window.addEventListener('blur', handleBlur);
@@ -663,6 +813,22 @@ export default function CanvasWorkspace({
       const ctx = baseCanvasRef.current?.getContext('2d');
       const hitRadius = 12 / s.zoom;
 
+      // 0. If clicking inside an active area/group selection box, drag the whole group
+      if (s.selectedGroup && ctx) {
+        const gBounds = getGroupBoundingBox(s.page, s.selectedGroup, ctx);
+        if (
+          gBounds &&
+          world.x >= gBounds.minX &&
+          world.x <= gBounds.maxX &&
+          world.y >= gBounds.minY &&
+          world.y <= gBounds.maxY
+        ) {
+          isMovingGroupRef.current = true;
+          return;
+        }
+        onSelectGroup(null);
+      }
+
       // 1. Check resize handles / anchor ports on currently selected structured element
       if (s.selectedElementId && s.selectedElementType === 'schema') {
         const sch = (s.page.schemas || []).find((i) => i.id === s.selectedElementId);
@@ -802,6 +968,14 @@ export default function CanvasWorkspace({
 
       onSelectElement(null);
       onSelectStroke(null);
+      onSelectGroup(null);
+      marqueeRef.current = {
+        mode: s.selectMode || 'box',
+        start: world,
+        current: world,
+        points: [world],
+      };
+      paintLiveMarquee(marqueeRef.current);
       return;
     }
 
@@ -930,6 +1104,28 @@ export default function CanvasWorkspace({
     if (isPanningRef.current) {
       onPanZoomChange(s.panX + dxScreen / s.zoom, s.panY + dyScreen / s.zoom, s.zoom);
       lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (isMovingGroupRef.current && s.selectedGroup) {
+      const dx = dxScreen / s.zoom;
+      const dy = dyScreen / s.zoom;
+      onUpdateGroupItems(dx, dy);
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (marqueeRef.current) {
+      const world = toWorld(e.clientX, e.clientY);
+      marqueeRef.current.current = world;
+      if (marqueeRef.current.mode === 'lasso') {
+        const pts = marqueeRef.current.points;
+        const last = pts[pts.length - 1];
+        if (!last || Math.hypot(world.x - last.x, world.y - last.y) >= 3 / s.zoom) {
+          pts.push(world);
+        }
+      }
+      paintLiveMarquee(marqueeRef.current);
       return;
     }
 
@@ -1087,6 +1283,115 @@ export default function CanvasWorkspace({
 
     if (isPanningRef.current) {
       isPanningRef.current = false;
+      return;
+    }
+
+    if (isMovingGroupRef.current) {
+      isMovingGroupRef.current = false;
+      onCommitGroupItems();
+      return;
+    }
+
+    if (marqueeRef.current) {
+      const m = marqueeRef.current;
+      marqueeRef.current = null;
+      clearLiveCanvas();
+
+      const s = stateRef.current;
+      const ctx = baseCanvasRef.current?.getContext('2d');
+      const isLasso = m.mode === 'lasso' && m.points.length >= 3;
+      const box = {
+        minX: Math.min(m.start.x, m.current.x),
+        minY: Math.min(m.start.y, m.current.y),
+        maxX: Math.max(m.start.x, m.current.x),
+        maxY: Math.max(m.start.y, m.current.y),
+      };
+
+      const hasDragArea = isLasso
+        ? m.points.length >= 4
+        : Math.hypot(box.maxX - box.minX, box.maxY - box.minY) > 6 / s.zoom;
+      if (!hasDragArea) return;
+
+      const pointHits = (x, y) =>
+        isLasso
+          ? pointInPolygon(x, y, m.points)
+          : x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY;
+
+      const rectHits = (r) => {
+        if (!isLasso) return rectsOverlap(r, box);
+        const cx = (r.minX + r.maxX) / 2;
+        const cy = (r.minY + r.maxY) / 2;
+        return (
+          pointInPolygon(cx, cy, m.points) ||
+          pointInPolygon(r.minX, r.minY, m.points) ||
+          pointInPolygon(r.maxX, r.minY, m.points) ||
+          pointInPolygon(r.minX, r.maxY, m.points) ||
+          pointInPolygon(r.maxX, r.maxY, m.points)
+        );
+      };
+
+      const strokeIndices = [];
+      (s.page.strokes || []).forEach((st, idx) => {
+        if (!st || st.tool === 'eraser' || !st.points?.length) return;
+        if (st.points.some((pt) => pointHits(pt.x, pt.y))) {
+          strokeIndices.push(idx);
+        } else if (!isLasso) {
+          const sb = getStrokeBoundingBox(st);
+          if (sb && rectsOverlap(sb, box) && st.points.length <= 2) {
+            strokeIndices.push(idx);
+          }
+        }
+      });
+
+      const textIds = [];
+      if (ctx) {
+        (s.page.texts || []).forEach((txt) => {
+          const tm = getTextMetrics(ctx, txt);
+          if (rectHits({ minX: txt.x, minY: txt.y, maxX: txt.x + tm.width, maxY: txt.y + tm.height })) {
+            textIds.push(txt.id);
+          }
+        });
+      }
+
+      const tableIds = [];
+      if (ctx) {
+        (s.page.tables || []).forEach((tbl) => {
+          const tm = getTableMetrics(ctx, tbl);
+          if (rectHits({ minX: tbl.x, minY: tbl.y, maxX: tbl.x + tm.totalWidth, maxY: tbl.y + tm.totalHeight })) {
+            tableIds.push(tbl.id);
+          }
+        });
+      }
+
+      const schemaIds = [];
+      (s.page.schemas || []).forEach((sch) => {
+        const sm = getSchemaMetrics(sch);
+        if (rectHits({ minX: sch.x, minY: sch.y, maxX: sch.x + sm.width, maxY: sch.y + sm.height })) {
+          schemaIds.push(sch.id);
+        }
+      });
+
+      const imageIds = [];
+      (s.page.images || []).forEach((img) => {
+        if (rectHits({ minX: img.x, minY: img.y, maxX: img.x + img.width, maxY: img.y + img.height })) {
+          imageIds.push(img.id);
+        }
+      });
+
+      const count =
+        strokeIndices.length + textIds.length + tableIds.length + schemaIds.length + imageIds.length;
+      if (count === 0) return;
+
+      if (count === 1) {
+        if (strokeIndices.length === 1) onSelectStroke(strokeIndices[0]);
+        else if (textIds.length === 1) onSelectStructuredElement('text', textIds[0]);
+        else if (tableIds.length === 1) onSelectStructuredElement('table', tableIds[0]);
+        else if (schemaIds.length === 1) onSelectStructuredElement('schema', schemaIds[0]);
+        else if (imageIds.length === 1) onSelectStructuredElement('image', imageIds[0]);
+        return;
+      }
+
+      onSelectGroup({ strokeIndices, textIds, tableIds, schemaIds, imageIds, count });
       return;
     }
 

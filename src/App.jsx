@@ -106,6 +106,8 @@ export default function App() {
   const [selectedElementId, setSelectedElementId] = useState(null);
   const [selectedElementType, setSelectedElementType] = useState(null);
   const [selectedStrokeIndex, setSelectedStrokeIndex] = useState(null);
+  const [selectMode, setSelectMode] = useState('box'); // 'box' | 'lasso'
+  const [selectedGroup, setSelectedGroup] = useState(null);
 
   // Active inline editors & schema connector mode
   const [editingTextId, setEditingTextId] = useState(null);
@@ -335,11 +337,13 @@ export default function App() {
     setSelectedElementType(type);
     setSelectedElementId(id);
     setSelectedStrokeIndex(null);
+    setSelectedGroup(null);
   }, []);
 
   const handleSelectElementCompat = useCallback((id) => {
     setSelectedElementId(id);
     setSelectedElementType(id ? 'image' : null);
+    if (id) setSelectedGroup(null);
   }, []);
 
   // Drawing callbacks
@@ -738,6 +742,147 @@ export default function App() {
     }));
     setSelectedStrokeIndex(null);
   }, [selectedStrokeIndex, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  const preDragGroupRef = useRef(null);
+
+  const handleUpdateGroupItems = useCallback(
+    (dx, dy) => {
+      if (!selectedGroup || !activePage) return;
+      if (!preDragGroupRef.current) {
+        preDragGroupRef.current = makeSnapshot(activePage);
+      }
+      const strokeSet = new Set(selectedGroup.strokeIndices || []);
+      const textSet = new Set(selectedGroup.textIds || []);
+      const tableSet = new Set(selectedGroup.tableIds || []);
+      const schemaSet = new Set(selectedGroup.schemaIds || []);
+      const imageSet = new Set(selectedGroup.imageIds || []);
+
+      mutateActivePage((p) => ({
+        ...p,
+        strokes: (p.strokes || []).map((st, idx) =>
+          strokeSet.has(idx)
+            ? { ...st, points: st.points.map((pt) => ({ ...pt, x: pt.x + dx, y: pt.y + dy })) }
+            : st
+        ),
+        texts: (p.texts || []).map((t) =>
+          textSet.has(t.id) && !t.locked ? { ...t, x: t.x + dx, y: t.y + dy } : t
+        ),
+        tables: (p.tables || []).map((t) =>
+          tableSet.has(t.id) && !t.locked ? { ...t, x: t.x + dx, y: t.y + dy } : t
+        ),
+        schemas: (p.schemas || []).map((s) =>
+          schemaSet.has(s.id) && !s.locked ? { ...s, x: s.x + dx, y: s.y + dy } : s
+        ),
+        images: (p.images || []).map((i) =>
+          imageSet.has(i.id) && !i.locked ? { ...i, x: i.x + dx, y: i.y + dy } : i
+        ),
+      }));
+    },
+    [selectedGroup, activePage, mutateActivePage]
+  );
+
+  const handleCommitGroupItems = useCallback(() => {
+    if (preDragGroupRef.current) {
+      const snap = preDragGroupRef.current;
+      preDragGroupRef.current = null;
+      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY - 1)), snap]);
+      setRedoStack([]);
+    }
+  }, []);
+
+  const handleDeleteSelectedGroup = useCallback(() => {
+    if (!selectedGroup || !activePage) return;
+    const strokeSet = new Set(selectedGroup.strokeIndices || []);
+    const textSet = new Set(selectedGroup.textIds || []);
+    const tableSet = new Set(selectedGroup.tableIds || []);
+    const schemaSet = new Set(selectedGroup.schemaIds || []);
+    const imageSet = new Set(selectedGroup.imageIds || []);
+
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      strokes: (p.strokes || []).filter((_, idx) => !strokeSet.has(idx)),
+      texts: (p.texts || []).filter((t) => !textSet.has(t.id) || t.locked),
+      tables: (p.tables || []).filter((t) => !tableSet.has(t.id) || t.locked),
+      schemas: (p.schemas || []).filter((s) => !schemaSet.has(s.id) || s.locked),
+      relations: (p.relations || []).filter(
+        (r) => !schemaSet.has(r.fromId) && !schemaSet.has(r.toId)
+      ),
+      images: (p.images || []).filter((i) => !imageSet.has(i.id) || i.locked),
+    }));
+    setSelectedGroup(null);
+  }, [selectedGroup, activePage, pushUndoSnapshot, mutateActivePage]);
+
+  const handleDuplicateSelectedGroup = useCallback(() => {
+    if (!selectedGroup || !activePage) return;
+    const offset = 24;
+    const strokeSet = new Set(selectedGroup.strokeIndices || []);
+    const textSet = new Set(selectedGroup.textIds || []);
+    const tableSet = new Set(selectedGroup.tableIds || []);
+    const schemaSet = new Set(selectedGroup.schemaIds || []);
+    const imageSet = new Set(selectedGroup.imageIds || []);
+
+    const dupStrokes = (activePage.strokes || [])
+      .filter((_, idx) => strokeSet.has(idx))
+      .map((st) => ({
+        ...st,
+        points: st.points.map((pt) => ({ ...pt, x: pt.x + offset, y: pt.y + offset })),
+      }));
+    const dupTexts = (activePage.texts || [])
+      .filter((t) => textSet.has(t.id))
+      .map((t) => ({ ...t, id: createId(), x: t.x + offset, y: t.y + offset, locked: false }));
+    const dupTables = (activePage.tables || [])
+      .filter((t) => tableSet.has(t.id))
+      .map((t) => ({
+        ...t,
+        id: createId(),
+        x: t.x + offset,
+        y: t.y + offset,
+        locked: false,
+        rows: JSON.parse(JSON.stringify(t.rows || [])),
+      }));
+    const dupSchemas = (activePage.schemas || [])
+      .filter((s) => schemaSet.has(s.id))
+      .map((s) => ({
+        ...s,
+        id: createId(),
+        x: s.x + offset,
+        y: s.y + offset,
+        locked: false,
+        fields: JSON.parse(JSON.stringify(s.fields || [])),
+      }));
+    const dupImages = (activePage.images || [])
+      .filter((i) => imageSet.has(i.id))
+      .map((i) => ({ ...i, id: createId(), x: i.x + offset, y: i.y + offset, locked: false }));
+
+    const baseStrokeIdx = (activePage.strokes || []).length;
+    const nextGroup = {
+      strokeIndices: dupStrokes.map((_, i) => baseStrokeIdx + i),
+      textIds: dupTexts.map((t) => t.id),
+      tableIds: dupTables.map((t) => t.id),
+      schemaIds: dupSchemas.map((s) => s.id),
+      imageIds: dupImages.map((i) => i.id),
+      count:
+        dupStrokes.length +
+        dupTexts.length +
+        dupTables.length +
+        dupSchemas.length +
+        dupImages.length,
+    };
+
+    pushUndoSnapshot(activePage);
+    mutateActivePage((p) => ({
+      ...p,
+      strokes: [...(p.strokes || []), ...dupStrokes],
+      texts: [...(p.texts || []), ...dupTexts],
+      tables: [...(p.tables || []), ...dupTables],
+      schemas: [...(p.schemas || []), ...dupSchemas],
+      images: [...(p.images || []), ...dupImages],
+      updatedAt: Date.now(),
+    }));
+    setSelectedGroup(nextGroup);
+    showToast(`Duplicated ${nextGroup.count} item${nextGroup.count === 1 ? '' : 's'}`);
+  }, [selectedGroup, activePage, pushUndoSnapshot, mutateActivePage, showToast]);
 
   const handlePanZoomChange = useCallback((nextPanX, nextPanY, nextZoom) => {
     setPanX(nextPanX);
@@ -1217,6 +1362,11 @@ export default function App() {
         handleRedo();
         return;
       }
+      if (meta && key === 'd' && selectedGroup) {
+        e.preventDefault();
+        handleDuplicateSelectedGroup();
+        return;
+      }
       if (meta && e.key === '\\') {
         e.preventDefault();
         setSidebarOpen((prev) => !prev);
@@ -1235,10 +1385,16 @@ export default function App() {
         setSelectedElementId(null);
         setSelectedElementType(null);
         setSelectedStrokeIndex(null);
+        setSelectedGroup(null);
         if (focusMode) setFocusMode(false);
         return;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && currentTool === 'select') {
+        if (selectedGroup) {
+          e.preventDefault();
+          handleDeleteSelectedGroup();
+          return;
+        }
         if (selectedImage) {
           e.preventDefault();
           handleDeleteSelectedImage();
@@ -1301,6 +1457,8 @@ export default function App() {
   }, [
     handleUndo,
     handleRedo,
+    handleDuplicateSelectedGroup,
+    handleDeleteSelectedGroup,
     handleDeleteSelectedImage,
     handleDeleteSelectedText,
     handleTableAction,
@@ -1309,6 +1467,7 @@ export default function App() {
     handleDeleteSelectedStroke,
     handleZoomStep,
     handleResetView,
+    selectedGroup,
     selectedImage,
     selectedText,
     selectedTable,
@@ -1326,6 +1485,7 @@ export default function App() {
       setSelectedElementId(null);
       setSelectedElementType(null);
       setSelectedStrokeIndex(null);
+      setSelectedGroup(null);
     }
   }, []);
 
@@ -1415,12 +1575,17 @@ export default function App() {
                 selectedElementId={selectedElementId}
                 selectedElementType={selectedElementType}
                 selectedStrokeIndex={selectedStrokeIndex}
+                selectMode={selectMode}
+                selectedGroup={selectedGroup}
                 editingTextId={editingTextId}
                 editingCell={editingCell}
                 connectingFromId={connectingFromId}
                 onSelectElement={handleSelectElementCompat}
                 onSelectStructuredElement={handleSelectStructuredElement}
                 onSelectStroke={setSelectedStrokeIndex}
+                onSelectGroup={setSelectedGroup}
+                onUpdateGroupItems={handleUpdateGroupItems}
+                onCommitGroupItems={handleCommitGroupItems}
                 onSetEditingTextId={setEditingTextId}
                 onSetEditingCell={setEditingCell}
                 onOpenSchemaEditor={(id) => setSchemaEditorId(id)}
@@ -1476,6 +1641,12 @@ export default function App() {
                 selectedSchema={selectedSchema}
                 selectedRelation={selectedRelation}
                 selectedStrokeIndex={selectedStrokeIndex}
+                selectMode={selectMode}
+                onChangeSelectMode={setSelectMode}
+                selectedGroup={selectedGroup}
+                onDuplicateSelectedGroup={handleDuplicateSelectedGroup}
+                onDeleteSelectedGroup={handleDeleteSelectedGroup}
+                onClearSelectedGroup={() => setSelectedGroup(null)}
                 onToggleImageLock={handleToggleImageLock}
                 onDeleteSelectedImage={handleDeleteSelectedImage}
                 onDeleteSelectedStroke={handleDeleteSelectedStroke}
